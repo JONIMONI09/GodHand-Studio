@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.yourcompany.godhand.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "BowItemMixin",
+    "EntityDataSaverMixin",
+    "LivingEntityMixin",
+    "MobEntityAccessor",
+    "MobEntityInvoker",
+    "ProjectileEntityMixin",
+    "EntityMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

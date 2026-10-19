@@ -1,0 +1,43 @@
+plugins {
+    id 'fabric-loom' version '1.13.3'
+    id 'java'
+}
+version = project.mod_version
+group = project.maven_group
+repositories {
+    mavenCentral()
+    maven { url = "https://maven.fabricmc.net/" }
+    maven { url = "https://maven.terraformersmc.com/releases/" }
+    maven { url = "https://api.modrinth.com/maven" }
+}
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}"
+    modImplementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}") {
+        exclude module: "fabric-content-registries-v0"
+    }
+    testImplementation "org.junit.jupiter:junit-jupiter-api:5.12.0"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:5.12.0"
+    testImplementation "org.mockito:mockito-core:5.12.0"
+    testImplementation "org.mockito:mockito-junit-jupiter:5.12.0"
+}
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_version": project.minecraft_version
+    }
+}
+tasks.named('test') {
+    useJUnitPlatform()
+    jvmArgs("-XX:+EnableDynamicAgentLoading")
+}
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+}
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}

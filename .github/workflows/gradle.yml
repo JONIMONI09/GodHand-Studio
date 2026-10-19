@@ -49,10 +49,11 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: godhand-mod
-        # Anführungszeichen hinzugefügt, da ein Leerzeichen im Ordnernamen "Libs Main_jar" Fehler verursachen kann
-        path: "godhand/build/libs/Libs Main_jar/*.jar"
+        path: "godhand/build/libs/*.jar"
+        if-no-files-found: warn
 
     - name: SonarQube Scan
+      if: env.SONAR_TOKEN != ''
       uses: sonarsource/sonarcloud-github-action@master
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
