@@ -29,7 +29,7 @@ public class CompanionBuffGoalTest {
     private LivingEntity mockCompanion;
     private NbtCompound mockNbt;
     private CompanionBuffGoal goal;
-    private Map<StatusEffect, StatusEffectInstance> activeEffectsMap;
+    private Map<net.minecraft.registry.entry.RegistryEntry<StatusEffect>, StatusEffectInstance> activeEffectsMap;
 
     @BeforeEach
     public void setup() {

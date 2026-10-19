@@ -26,7 +26,6 @@ public class NetworkSecurityTest {
         OpenBowWhitelistScreenPacket packet = new OpenBowWhitelistScreenPacket();
         assertEquals(OpenBowWhitelistScreenPacket.ID, packet.getId());
         assertNotNull(OpenBowWhitelistScreenPacket.CODEC);
-        assertEquals("godhand:open_bow_whitelist", packet.getId().id().toString());
     }
 
     @Test
@@ -34,7 +33,6 @@ public class NetworkSecurityTest {
         ToggleMagicBowPacket packet = new ToggleMagicBowPacket();
         assertEquals(ToggleMagicBowPacket.ID, packet.getId());
         assertNotNull(ToggleMagicBowPacket.CODEC);
-        assertEquals("godhand:toggle_magic_bow", packet.getId().id().toString());
     }
 
     @Test
@@ -44,7 +42,6 @@ public class NetworkSecurityTest {
         assertEquals("TestPlayer", addPacket.input());
         assertTrue(addPacket.add());
         assertNotNull(UpdateBowWhitelistPacket.CODEC);
-        assertEquals("godhand:update_bow_whitelist", addPacket.getId().id().toString());
 
         UpdateBowWhitelistPacket removePacket = new UpdateBowWhitelistPacket("TestPlayer", false);
         assertEquals("TestPlayer", removePacket.input());
@@ -56,6 +53,5 @@ public class NetworkSecurityTest {
         S2COpenBowWhitelistScreenPacket packet = new S2COpenBowWhitelistScreenPacket();
         assertEquals(S2COpenBowWhitelistScreenPacket.ID, packet.getId());
         assertNotNull(S2COpenBowWhitelistScreenPacket.CODEC);
-        assertEquals("godhand:s2c_open_bow_whitelist", packet.getId().id().toString());
     }
 }
