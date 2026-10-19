@@ -41,11 +41,11 @@ jobs:
       - name: TypeScript Linting Check
         run: npm run lint --prefix dashboard
 
-      - name: Run Automated Test Suites
-        run: npm test
-
       - name: Build Web IDE Dashboard
         run: npm run build --prefix dashboard
+
+      - name: Run Automated Test Suites
+        run: npm test
 
       - name: Verify Gradle Wrapper Executable
         run: |

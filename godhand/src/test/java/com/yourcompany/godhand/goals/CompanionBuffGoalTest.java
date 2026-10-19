@@ -29,27 +29,14 @@ public class CompanionBuffGoalTest {
     private LivingEntity mockCompanion;
     private NbtCompound mockNbt;
     private CompanionBuffGoal goal;
-    private Map<net.minecraft.registry.entry.RegistryEntry<StatusEffect>, StatusEffectInstance> activeEffectsMap;
 
     @BeforeEach
     public void setup() {
-        // mock completely by disabling deep stubbing but with default answer to allow methods like getStatusEffect to work
-        mockCompanion = mock(LivingEntity.class, withSettings().extraInterfaces(IEntityDataSaver.class).defaultAnswer(CALLS_REAL_METHODS));
+        mockCompanion = mock(LivingEntity.class, withSettings().extraInterfaces(IEntityDataSaver.class));
         mockNbt = new NbtCompound();
         goal = new CompanionBuffGoal(mockCompanion);
 
         doReturn(mockNbt).when((IEntityDataSaver) mockCompanion).getPersistentData();
-        activeEffectsMap = new HashMap<>();
-
-        try {
-            for (Field f : LivingEntity.class.getDeclaredFields()) {
-                if (Map.class.isAssignableFrom(f.getType())) {
-                    f.setAccessible(true);
-                    f.set(mockCompanion, activeEffectsMap);
-                    break;
-                }
-            }
-        } catch (Exception e) {}
     }
 
     @Test
@@ -59,44 +46,50 @@ public class CompanionBuffGoalTest {
 
         org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
 
+        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(null);
+
         goal.tick();
 
-        StatusEffectInstance appliedEffect = activeEffectsMap.get(StatusEffects.REGENERATION);
-        assertNotNull(appliedEffect, "Effect should have been added to activeEffectsMap");
-        assertEquals(StatusEffects.REGENERATION, appliedEffect.getEffectType());
-        assertEquals(210, appliedEffect.getDuration());
+        verify(mockCompanion).addStatusEffect(argThat(inst -> 
+            inst != null && 
+            StatusEffects.REGENERATION.equals(inst.getEffectType()) && 
+            inst.getDuration() == 210
+        ));
     }
 
     @Test
     public void testTick_DoesNotAddEffectWhenAlreadyPresentAndDurationHigh() {
         StatusEffectInstance currentEffect = new StatusEffectInstance(StatusEffects.REGENERATION, 100, 0);
-        activeEffectsMap.put(StatusEffects.REGENERATION, currentEffect);
 
         mockNbt.putBoolean("godhand_is_companion", true);
         mockNbt.putBoolean("godhand_effect_regen", true);
 
         org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
 
+        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(currentEffect);
+
         goal.tick();
 
-        assertEquals(100, activeEffectsMap.get(StatusEffects.REGENERATION).getDuration());
+        verify(mockCompanion, never()).addStatusEffect(any());
     }
 
     @Test
     public void testTick_AddsEffectWhenAlreadyPresentButDurationLow() {
         StatusEffectInstance currentEffect = new StatusEffectInstance(StatusEffects.REGENERATION, 15, 0);
-        activeEffectsMap.put(StatusEffects.REGENERATION, currentEffect);
 
         mockNbt.putBoolean("godhand_is_companion", true);
         mockNbt.putBoolean("godhand_effect_regen", true);
 
         org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
 
+        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(currentEffect);
+
         goal.tick();
 
-        StatusEffectInstance appliedEffect = activeEffectsMap.get(StatusEffects.REGENERATION);
-        assertNotNull(appliedEffect, "Effect should have been added to activeEffectsMap");
-        assertEquals(StatusEffects.REGENERATION, appliedEffect.getEffectType());
-        assertEquals(210, appliedEffect.getDuration());
+        verify(mockCompanion).addStatusEffect(argThat(inst -> 
+            inst != null && 
+            StatusEffects.REGENERATION.equals(inst.getEffectType()) && 
+            inst.getDuration() == 210
+        ));
     }
 }
