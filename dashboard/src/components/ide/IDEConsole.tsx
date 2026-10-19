@@ -24,7 +24,7 @@ import {
 import { useTranslation } from '../../i18n/translations';
 import { toast } from 'react-hot-toast';
 import { IDEGameplayTab } from './IDEGameplayTab';
-import { diagnoseJava, applyJavaFix as clientApplyFix } from '../../lib/diagnostics';
+import { diagnoseJava, applyJavaFix as clientApplyFix, DiagnosticItem } from '../../lib/diagnostics';
 
 interface IDEConsoleProps {
   buildLogs: string[];
@@ -50,15 +50,6 @@ interface CompilerTask {
   desc: string;
   group: string;
   cmd: string;
-}
-
-interface DiagnosticItem {
-  line: number;
-  type: string;
-  severity: 'error' | 'warning';
-  message: string;
-  typo?: string;
-  suggestedFix?: string;
 }
 
 export const IDEConsole: React.FC<IDEConsoleProps> = ({

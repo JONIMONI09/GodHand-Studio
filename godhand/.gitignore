@@ -1,0 +1,48 @@
+# ==============================================================================
+# GodHand Minecraft Mod — .gitignore
+# ==============================================================================
+
+# Gradle
+.gradle/
+build/
+!build/libs/Libs Main_jar/
+bin/
+
+# Minecraft Runtime Runs
+run/
+logs/
+*.log
+*.dat
+*.dat_old
+*.mca
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# NetBeans
+/nbproject/private/
+/build/
+/nbbuild/
+/dist/
+/nbdist/
+.nb-gradle/
+
+# Eclipse
+.settings/
+.classpath
+.project
+
+# VS Code
+.vscode/
+
+# Temporary and Test Outputs
+test_results.txt
+*.tmp
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
