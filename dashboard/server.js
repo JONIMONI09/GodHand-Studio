@@ -332,11 +332,14 @@ app.post('/api/build', async (req, res) => {
 
   try {
     const JAVA_HOME = await ensureJDK();
-    const gradlewBin = path.join(ROOT_DIR, 'godhand', 'gradlew');
+    const projectDir = path.join(ROOT_DIR, 'godhand');
+    const inv = gradlewInvocation(projectDir);
+    const env = buildJavaEnv(JAVA_HOME, process.env);
     ensureGradlewExecutable();
-    buildProcess = spawn(gradlewBin, gradleArgs, {
-      cwd: path.join(ROOT_DIR, 'godhand'),
-      env: { ...process.env, JAVA_HOME, PATH: `${JAVA_HOME}/bin:${process.env.PATH}` }
+    buildProcess = spawn(inv.command, gradleArgs, {
+      cwd: projectDir,
+      env,
+      shell: inv.shell
     });
 
     buildProcess.stdout.on('data', (data) => {
@@ -396,10 +399,14 @@ app.post('/api/run-server', async (req, res) => {
     const JAVA_HOME = await ensureJDK();
     serverLogs.push(`Starting Minecraft Server via Fabric Loader with JDK...`);
 
+    const projectDir = path.join(ROOT_DIR, 'godhand');
+    const inv = gradlewInvocation(projectDir);
+    const env = buildJavaEnv(JAVA_HOME, process.env);
     // Launch Gradle runServer task
-    serverProcess = spawn('./gradlew', ['runServer'], {
-      cwd: path.join(ROOT_DIR, 'godhand'),
-      env: { ...process.env, JAVA_HOME, PATH: `${JAVA_HOME}/bin:${process.env.PATH}` }
+    serverProcess = spawn(inv.command, ['runServer'], {
+      cwd: projectDir,
+      env,
+      shell: inv.shell
     });
 
     serverProcess.stdout.on('data', (data) => {
@@ -1201,8 +1208,9 @@ app.post('/api/admin/arm32-fix/build', (req, res) => {
   res.json({ message: 'ARM32 fix mod build initiated' });
 
   try {
+    const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
     const buildScript = path.resolve(ROOT_DIR, 'scripts/build-arm32-mod.py');
-    const proc = spawn('python3', [buildScript], { cwd: ROOT_DIR });
+    const proc = spawn(pythonBin, [buildScript], { cwd: ROOT_DIR });
 
     proc.stdout.on('data', (d) => {
       const line = d.toString().trim();
@@ -1557,8 +1565,9 @@ app.post('/api/system-mods/:id/build', (req, res) => {
     res.json({ message: 'ARM32 fix mod build initiated' });
 
     try {
+      const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
       const buildScript = path.resolve(ROOT_DIR, 'scripts/build-arm32-mod.py');
-      const proc = spawn('python3', [buildScript], { cwd: ROOT_DIR });
+      const proc = spawn(pythonBin, [buildScript], { cwd: ROOT_DIR });
       proc.stdout.on('data', d => {
         const line = d.toString().trim();
         if (line) arm32BuildLogs.push(line);
@@ -1601,9 +1610,10 @@ app.post('/api/system-mods/:id/build', (req, res) => {
   res.json({ message: `Build initiated for ${modId}` });
 
   try {
-    const gradlew = path.resolve(modDir, 'gradlew');
-    if (fs.existsSync(gradlew)) {
-      const proc = spawn('./gradlew', ['build', '--no-daemon'], { cwd: modDir });
+    const hasGradlew = fs.existsSync(path.resolve(modDir, 'gradlew')) || fs.existsSync(path.resolve(modDir, 'gradlew.bat'));
+    if (hasGradlew) {
+      const inv = gradlewInvocation(modDir);
+      const proc = spawn(inv.command, ['build', '--no-daemon'], { cwd: modDir, shell: inv.shell });
       proc.stdout.on('data', d => {
         const line = d.toString().trim();
         if (line) state.logs.push(line);
@@ -1638,7 +1648,8 @@ with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(full, rel)
 print("SUCCESS: Packaged " + target)
 `;
-      const proc = spawn('python3', ['-c', pyScript]);
+      const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+      const proc = spawn(pythonBin, ['-c', pyScript]);
       proc.stdout.on('data', d => state.logs.push(d.toString().trim()));
       proc.stderr.on('data', d => state.logs.push('[WARN] ' + d.toString().trim()));
       proc.on('close', code => {
