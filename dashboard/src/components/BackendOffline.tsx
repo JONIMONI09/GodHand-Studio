@@ -19,6 +19,7 @@ import {
   probeBackendStatus, 
   getCustomBackendUrl, 
   setCustomBackendUrl, 
+  clearCustomBackendUrl,
   isVFSMode 
 } from '../lib/api';
 import { BrowserVFS } from '../lib/vfs';
@@ -64,19 +65,25 @@ export function BackendOfflineModal() {
   const handleSaveBackend = async () => {
     setIsTesting(true);
     try {
-      if (backendInput.trim()) {
-        setCustomBackendUrl(backendInput.trim());
-      } else {
-        setCustomBackendUrl(null);
+      const trimmed = backendInput.trim();
+      if (!trimmed) {
+        clearCustomBackendUrl();
+        toast.success(t('switchToVfs'));
+        setIsOpen(false);
+        return;
       }
+
+      setCustomBackendUrl(trimmed);
       const online = await probeBackendStatus();
       if (online) {
         toast.success(t('connectedStatus'));
         setIsOpen(false);
       } else {
-        toast.error(language === 'de' ? 'Backend unter dieser URL nicht erreichbar. VFS-Modus bleibt aktiv.' : 'Backend unreachable at this URL. VFS mode remains active.');
+        clearCustomBackendUrl();
+        toast.error(language === 'de' ? 'Backend/Tunnel unter dieser URL nicht erreichbar. Reiner VFS-Modus bleibt aktiv.' : 'Backend unreachable at this URL. Pure VFS mode remains active.');
       }
     } catch (err: any) {
+      clearCustomBackendUrl();
       toast.error(err.message || 'Connection failed');
     } finally {
       setIsTesting(false);
@@ -84,7 +91,7 @@ export function BackendOfflineModal() {
   };
 
   const handleResetToVFS = () => {
-    setCustomBackendUrl(null);
+    clearCustomBackendUrl();
     setBackendInput('');
     toast.success(t('switchToVfs'));
     setIsOpen(false);
