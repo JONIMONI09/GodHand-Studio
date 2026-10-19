@@ -228,6 +228,12 @@ async function handleVfsFallback(normalizedPath: string, options: RequestInit = 
     });
   }
 
+  if (pathname === '/api/vfs/reset' && method === 'POST') {
+    const proj = body.projectId || query.get('project') || 'godhand';
+    const count = await BrowserVFS.resetWorkspaceToDefaults(proj);
+    return jsonResponse({ success: true, count, message: `Reset ${count} files to repository defaults` });
+  }
+
   // File System API
   if (pathname === '/api/fs/tree') {
     const proj = query.get('project') || 'godhand';

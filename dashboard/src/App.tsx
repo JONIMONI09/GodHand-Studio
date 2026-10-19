@@ -20,10 +20,10 @@ import { collection, addDoc, doc, getDoc, getDocs, deleteDoc, updateDoc, query, 
 import { GitStudio } from './components/GitStudio';
 import { SupportTicketModal } from './components/SupportTicketModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
-import { logger } from './lib/logger';
 import { useActivity } from './context/ActivityContext';
-import { LocalhostBanner } from './components/LocalhostBanner';
 import { diagnoseJava } from './lib/diagnostics';
+import { compileModToJar, downloadBlob } from './lib/jarCompiler';
+import { isVFSMode } from './lib/api';
 
 import ModDetails from './pages/ModDetails';
 import { IDEHeader } from './components/ide/IDEHeader';
@@ -354,6 +354,24 @@ function IDE() {
     setBuildLogs(['[INFO] Starting compiler build pipeline...']);
     
     try {
+      if (isVFSMode()) {
+        const targetProj = isCoreMod && coreModId ? coreModId : (projectId || 'godhand');
+        setBuildLogs([`[Client-Compiler] Initializing Zero-PAT In-Browser compilation for ${targetProj}...`]);
+        const res = await compileModToJar(targetProj, (msg) => {
+          setBuildLogs(prev => [...prev, msg]);
+        });
+        if (res.success && res.blob) {
+          downloadBlob(res.blob, res.filename);
+          setBuildLogs(prev => [...prev, `[SUCCESS] Compiled ${res.filename} (${(res.blob!.size / 1024).toFixed(1)} KB)`]);
+          toast.success(language === 'de' ? `Kompilierung erfolgreich: ${res.filename} heruntergeladen!` : `Build successful: Downloaded ${res.filename}!`);
+        } else {
+          setBuildLogs(prev => [...prev, `[ERROR] Build aborted with ${res.diagnostics.length} error(s).`]);
+          toast.error(language === 'de' ? 'Kompilierung fehlgeschlagen' : 'Build failed');
+        }
+        setIsBuilding(false);
+        return;
+      }
+
       if (isCoreMod && coreModId) {
         await fetch(`/api/system-mods/${coreModId}/build`, { method: 'POST' });
         const interval = setInterval(async () => {
@@ -955,8 +973,6 @@ function IDE() {
 
   return (
     <div className="h-screen flex flex-col bg-[#1e1e1e] text-slate-300 overflow-hidden">
-      <LocalhostBanner />
-      {isBackendOffline && <BackendOfflineModal />}
       <IDEHeader
         projectId={projectId}
         isCoreMod={isCoreMod}
@@ -989,6 +1005,7 @@ function IDE() {
         {/* Modular Collapsible & Responsive File Explorer */}
         <IDEFileExplorer
           onRefreshTree={refreshFileTree}
+          onSelectMod={(newId) => navigate(`/ide/${newId}`)}
           projectId={isCoreMod && coreModId ? coreModId : (projectId || 'godhand')}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={toggleSidebarCollapse}
@@ -1107,9 +1124,6 @@ function IDE() {
           if (isTerminalCollapsed) toggleTerminalCollapse();
         }}
       />
-
-      {/* SDK & JDK Download Progress Notification Modal */}
-      <SDKDownloadModal />
 
       {/* Delete File / Folder Confirmation Modal */}
       {nodeToDelete && (
@@ -1711,7 +1725,6 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {isBackendOffline && <BackendOfflineModal />}
       <header className="border-b border-slate-800 bg-slate-900/50 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <Code className="h-6 w-6 text-emerald-400 shrink-0" />

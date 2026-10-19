@@ -2397,7 +2397,20 @@ if (!fs.existsSync(distIndex)) {
   }
 }
 
+// Support both root and GitHub Pages subpath (/GodHand-Studio/)
+app.use('/GodHand-Studio', express.static(distDir));
 app.use(express.static(distDir));
+
+// Route /GodHand-Studio and /GodHand-Studio/* to dist/index.html
+app.get(['/GodHand-Studio', '/GodHand-Studio/*'], (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
+  next();
+});
 
 // Non-API SPA catch-all route
 app.get('*', (req, res, next) => {

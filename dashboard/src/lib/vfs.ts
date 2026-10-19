@@ -496,6 +496,28 @@ public class GodHandFeatures {
 `
 };
 
+let cachedVfsBundle: Record<string, Record<string, string>> | null = null;
+
+async function fetchVfsBundle(): Promise<Record<string, Record<string, string>> | null> {
+  if (cachedVfsBundle) return cachedVfsBundle;
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return null;
+
+  const tryUrls = ['./vfs-bundle.json', '/vfs-bundle.json', 'vfs-bundle.json'];
+  for (const url of tryUrls) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.projects) {
+          cachedVfsBundle = data.projects;
+          return cachedVfsBundle;
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 export class BrowserVFS {
   private static initializedProjects = new Set<string>();
 
@@ -510,6 +532,27 @@ export class BrowserVFS {
     return `vfs_${scope}::${cleanPath}`;
   }
 
+  public static async resetWorkspaceToDefaults(projectId?: string): Promise<number> {
+    const scope = this.getProjectScope(projectId);
+    const prefix = `vfs_${scope}::`;
+    const existing = await idbGetAllKeys(prefix);
+    for (const key of existing) {
+      await idbDelete(key);
+    }
+
+    const bundle = await fetchVfsBundle();
+    const sourceMap = bundle?.[scope] || (scope === 'arm32-fix' ? ARM32_FIX_SEED : GODHAND_DEFAULT_SEED);
+
+    let count = 0;
+    for (const [filePath, content] of Object.entries(sourceMap)) {
+      await idbSet(this.getStorageKey(scope, filePath), content);
+      count++;
+    }
+
+    this.initializedProjects.add(scope);
+    return count;
+  }
+
   public static async ensureInitialized(projectId?: string): Promise<void> {
     const scope = this.getProjectScope(projectId);
     if (this.initializedProjects.has(scope)) return;
@@ -517,9 +560,11 @@ export class BrowserVFS {
     const prefix = `vfs_${scope}::`;
     const existing = await idbGetAllKeys(prefix);
 
-    if (existing.length === 0) {
-      const seed = scope === 'arm32-fix' ? ARM32_FIX_SEED : GODHAND_DEFAULT_SEED;
-      for (const [filePath, content] of Object.entries(seed)) {
+    // If empty or previously cached with dummy files (< 15 entries for godhand), reseed with full bundle
+    if (existing.length === 0 || (scope === 'godhand' && existing.length < 15)) {
+      const bundle = await fetchVfsBundle();
+      const sourceMap = bundle?.[scope] || (scope === 'arm32-fix' ? ARM32_FIX_SEED : GODHAND_DEFAULT_SEED);
+      for (const [filePath, content] of Object.entries(sourceMap)) {
         await idbSet(this.getStorageKey(scope, filePath), content);
       }
     }
