@@ -1,0 +1,6 @@
+{
+  "name": "Godhand Minecraft Mod Control Center",
+  "description": "Advanced Minecraft Fabric mod development suite, Web IDE, and runtime optimization environment.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

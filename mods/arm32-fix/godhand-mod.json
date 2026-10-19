@@ -1,0 +1,8 @@
+{
+  "id": "arm32-fix",
+  "name": "ARM32 Hardware Alignment Fix",
+  "loader": "fabric",
+  "mcVersion": "1.21.1",
+  "isSample": false,
+  "description": "Fixes fatal ARM32/v8l hardware alignment crashes (java.lang.InternalError: a fault occurred in an unsafe memory access operation / Unsafe.putFloat) on Android devices by safely redirecting unaligned float memory writes."
+}

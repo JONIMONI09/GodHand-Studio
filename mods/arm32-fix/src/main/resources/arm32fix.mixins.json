@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.godhand.arm32fix.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MemoryUtilAlignmentMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

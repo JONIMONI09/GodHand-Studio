@@ -1,0 +1,54 @@
+name: Fallow Security and Codebase Intelligence
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly scan
+
+jobs:
+  fallow-scan:
+    name: Run Fallow Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install Dependencies
+        run: npm ci
+        
+      - name: Install Fallow
+        run: npm install -g fallow
+        
+      - name: Run Fallow Code Intelligence & Security Check
+        id: fallow
+        run: |
+          npx fallow \
+            --format github-summary \
+            --production \
+            --explain \
+            --score \
+            --dupes-mode semantic \
+            --fail-on-issues \
+            --output-file fallow-report.md || echo "FALLOW_FAILED=true" >> $GITHUB_ENV
+            
+      - name: Create System Actionflow Issue if findings exist
+        if: env.FALLOW_FAILED == 'true'
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "System Actionflow: Security and Codebase Improvements"
+          content-filepath: fallow-report.md
+          labels: |
+            security
+            maintenance
+            automated-finding

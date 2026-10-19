@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Godhand Minecraft Mod Control Center</title>
+    <meta name="description" content="Advanced Minecraft Fabric mod development suite, Web IDE, and runtime optimization environment." />
+    <meta property="og:title" content="Godhand Minecraft Mod Control Center" />
+    <meta property="og:description" content="Advanced Minecraft Fabric mod development suite, Web IDE, and runtime optimization environment." />
+    <script>
+      // Early suppressor for benign ResizeObserver notifications from Monaco editor and splitters
+      window.addEventListener('error', function(e) {
+        if (e.message && (
+          e.message.includes('ResizeObserver') ||
+          e.message.includes('ResizeObserver loop completed with undelivered notifications') ||
+          e.message.includes('ResizeObserver loop limit exceeded')
+        )) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          return true;
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(e) {
+        if (e.reason && typeof e.reason.message === 'string' && e.reason.message.includes('ResizeObserver')) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true);
+    </script>
+  </head>
+  <body class="bg-[#0b0f19] text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-slate-900 overflow-x-hidden">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

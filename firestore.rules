@@ -1,0 +1,204 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    
+    // Auth helpers
+    function getUserRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'user';
+    }
+    
+    function isOwner() { 
+      return isSignedIn() && (getUserRole() == 'owner' || request.auth.token.email == 'ggjonasgameryt@gmail.com'); 
+    }
+    function isAdmin() { return isSignedIn() && (isOwner() || getUserRole() == 'admin'); }
+    function isMod() { return isSignedIn() && (isAdmin() || getUserRole() == 'mod'); }
+    function isSupporter() { return isSignedIn() && (isMod() || getUserRole() == 'supporter'); }
+    function isStaff() { return isSupporter(); }
+
+    // Validation
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'banned', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() <= 100
+        && (!('username' in data) || (data.username is string && data.username.size() <= 50))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+        && (!('isProfilePublic' in data) || data.isProfilePublic is bool)
+        && data.role in ['owner', 'admin', 'mod', 'supporter', 'user']
+        && data.banned is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'status', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && data.status in ['active', 'quarantined', 'deleted']
+        && (!('reportsCount' in data) || (data.reportsCount is number && data.reportsCount >= 0))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('deletedAt' in data) || data.deletedAt is timestamp)
+        && (!('deletedBy' in data) || data.deletedBy in ['user', 'admin'])
+        && (!('deleteReason' in data) || (data.deleteReason is string && data.deleteReason.size() <= 500));
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['projectId', 'reporterId', 'reason', 'status', 'createdAt', 'updatedAt'])
+        && data.projectId is string && data.projectId.size() <= 128
+        && data.reporterId is string && data.reporterId.size() <= 128
+        && data.reason is string && data.reason.size() <= 500
+        && data.status in ['pending', 'resolved']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPasswordReset(data) {
+      return data.keys().hasAll(['email', 'code', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 5
+        && data.email is string && data.email.size() <= 100
+        && data.code is string && data.code.size() <= 10
+        && data.status in ['pending', 'completed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() || (resource != null && resource.data.isProfilePublic == true);
+      allow list: if isStaff();
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId 
+        && isValidId(userId)
+        && isValidUser(incoming())
+        && (incoming().role == 'user' || (incoming().role in ['admin', 'owner'] && request.auth.token.email == 'ggjonasgameryt@gmail.com'))
+        && incoming().banned == false;
+        
+      allow update: if isSignedIn() && isValidId(userId) && (
+        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'bio', 'isProfilePublic', 'updatedAt'])) ||
+        (isOwner()) ||
+        (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'banned', 'updatedAt']) && existing().role != 'owner' && incoming().role != 'owner') ||
+        (isMod() && incoming().diff(existing()).affectedKeys().hasOnly(['banned', 'updatedAt']))
+      );
+
+      allow delete: if isOwner();
+    }
+
+    function isValidPublishedProject(data) {
+      return data.keys().hasAll(['title', 'description', 'authorId', 'authorEmail', 'isPublic', 'javaVersion', 'createdAt', 'updatedAt'])
+        && data.title is string
+        && data.description is string
+        && (!('coverImage' in data) || data.coverImage is string)
+        && (!('details' in data) || data.details is string)
+        && data.authorId is string
+        && data.authorEmail is string
+        && (!('authorUsername' in data) || (data.authorUsername is string && data.authorUsername.size() <= 50))
+        && (!('originalProjectId' in data) || (data.originalProjectId is string && data.originalProjectId.size() <= 128))
+        && (!('includeJar' in data) || (data.includeJar is bool))
+        && data.isPublic is bool
+        && data.javaVersion is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /published_projects/{projectId} {
+      allow read, list: if true;
+      allow create: if isSignedIn()
+        && incoming().authorId == request.auth.uid
+        && isValidPublishedProject(incoming());
+      allow delete: if isSignedIn() && (resource == null || existing().authorId == request.auth.uid || isMod());
+      allow update: if isSignedIn() && (
+        ((existing().authorId == request.auth.uid || isMod()) && isValidPublishedProject(incoming())) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'likedBy']) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isPublic', 'updatedAt'])
+      );
+    }
+
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid || isSupporter());
+      allow list: if isSignedIn();
+      allow read: if isSignedIn();
+      allow delete: if isSignedIn() && (resource == null || existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn()
+        && isValidId(projectId)
+        && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(projectId) && (
+        (request.auth.uid == existing().ownerId) ||
+        isSupporter() ||
+        isAdmin() ||
+        incoming().diff(existing()).affectedKeys().hasOnly(['reportsCount', 'updatedAt'])
+      );
+    }
+
+    match /reports/{reportId} {
+      allow read, list: if isStaff();
+      allow create: if isSignedIn()
+        && isValidId(reportId)
+        && isValidReport(incoming())
+        && incoming().reporterId == request.auth.uid
+        && incoming().status == 'pending';
+      allow update: if isStaff() 
+        && isValidId(reportId) 
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'assignedTo', 'assignedToName', 'resolutionReason']);
+    }
+
+    match /tickets/{ticketId} {
+      allow read: if isStaff() || (isSignedIn() && resource != null && resource.data.reporterId == request.auth.uid);
+      allow list: if isStaff() || isSignedIn();
+      allow create: if isSignedIn() && incoming().reporterId == request.auth.uid;
+      allow update: if isStaff() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isStaff() || (isSignedIn() && get(/databases/$(database)/documents/tickets/$(ticketId)).data.reporterId == request.auth.uid && resource.data.isInternal != true);
+        allow list: if isStaff() || (isSignedIn() && get(/databases/$(database)/documents/tickets/$(ticketId)).data.reporterId == request.auth.uid);
+        allow create: if isStaff() || (isSignedIn() && get(/databases/$(database)/documents/tickets/$(ticketId)).data.reporterId == request.auth.uid && incoming().isInternal == false);
+      }
+    }
+
+    match /team_messages/{messageId} {
+      allow read, list: if isSignedIn() && (
+        (resource.data.channel == 'owner-audit-log' && isOwner()) ||
+        (resource.data.channel == 'admin-only' && isAdmin()) ||
+        (resource.data.channel != 'owner-audit-log' && resource.data.channel != 'admin-only' && isStaff())
+      );
+      allow create: if isSignedIn() && (
+        (incoming().channel == 'owner-audit-log' && isStaff()) ||
+        (incoming().channel == 'admin-only' && isAdmin()) ||
+        (incoming().channel != 'owner-audit-log' && incoming().channel != 'admin-only' && isStaff())
+      );
+      allow delete: if isOwner() || (isAdmin() && resource.data.channel != 'owner-audit-log');
+    }
+
+    match /audit_logs/{logId} {
+      allow read, list: if isOwner() || isAdmin();
+      allow create: if isStaff();
+      allow update, delete: if isOwner();
+    }
+
+    match /password_resets/{resetId} {
+      allow create: if isValidId(resetId)
+        && isValidPasswordReset(incoming())
+        && incoming().status == 'pending';
+      
+      allow read, list: if isAdmin();
+      
+      allow update: if isAdmin() 
+        && isValidId(resetId) 
+        && isValidPasswordReset(incoming()) 
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+    }
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

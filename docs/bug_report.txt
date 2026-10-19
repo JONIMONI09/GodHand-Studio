@@ -1,0 +1,10 @@
+Bug Report: Critical Performance Degradation in CompanionBuffGoal.java
+
+File: godhand/src/main/java/com/yourcompany/godhand/goals/CompanionBuffGoal.java
+Lines: 39-50
+
+Description:
+In the `tick()` method of `CompanionBuffGoal`, new `StatusEffectInstance` objects for active buffs (Regeneration, Strength, Speed, Resistance) were created on every tick (20 times per second) and applied to the entity. Because companions are active continuously, this resulted in up to 80 allocations per second per companion entity. This imposed heavy pressure on the Garbage Collector (GC) and induced severe server lag (TPS drops) in worlds with multiple companion entities.
+
+Resolution Strategy:
+Implement a condition verifying that a new `StatusEffectInstance` is created and applied only when the effect is missing from the entity or when the remaining duration falls below a specified threshold (e.g., 20 ticks). This drastically cuts object allocations and completely resolves the GC thrashing issue.

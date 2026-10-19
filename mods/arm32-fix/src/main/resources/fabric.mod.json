@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "arm32fix",
+  "version": "${version}",
+  "name": "ARM32 Hardware Alignment Fix",
+  "description": "Fixes fatal ARM32/v8l hardware alignment crashes (java.lang.InternalError: a fault occurred in an unsafe memory access operation / Unsafe.putFloat) on Android devices by safely redirecting unaligned float memory writes.",
+  "authors": [
+    "GodHand AI Engine",
+    "Admin Team"
+  ],
+  "contact": {
+    "homepage": "https://github.com/JONIMONI09/Java_IDE"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.godhand.arm32fix.Arm32FixMod"
+    ]
+  },
+  "mixins": [
+    "arm32fix.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": ">=1.21",
+    "java": ">=21"
+  }
+}

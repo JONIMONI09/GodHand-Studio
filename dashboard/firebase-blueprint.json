@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and role management.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "mod", "supporter", "user"] },
+        "banned": { "type": "boolean" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["email", "role", "banned", "createdAt", "updatedAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "User projects/mods.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["active", "quarantined"] },
+        "reportsCount": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["ownerId", "name", "status", "reportsCount", "createdAt", "updatedAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Report for inappropriate projects.",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "maxLength": 128 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "resolved"] },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["projectId", "reporterId", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "PasswordReset": {
+      "title": "Password Reset Request",
+      "description": "Random code generated for admin password reset.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 100 },
+        "code": { "type": "string", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["email", "code", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and roles."
+    },
+    "projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Stores projects/mods."
+    },
+    "reports/{reportId}": {
+      "schema": { "$ref": "#/entities/Report" },
+      "description": "Stores reports."
+    },
+    "password_resets/{resetId}": {
+      "schema": { "$ref": "#/entities/PasswordReset" },
+      "description": "Stores password reset requests."
+    }
+  }
+}
