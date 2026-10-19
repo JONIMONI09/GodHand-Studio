@@ -49,4 +49,19 @@
   - If an HTML fallback is returned on an API route, gracefully catch it and expose actionable error messaging.
   - Provide `<LocalhostBanner />` and 1-click native launcher scripts (`start-godhand.bat`, `launch-godhand.ps1`) to run the Node.js compiler backend on `http://localhost:3000` alongside the cloud frontend.
 
+### 9. In-Browser Virtual File System (VFS) & Standalone Cloud Modding
+- **Problem**: When users access static deployments (Firebase Hosting or GitHub Pages) without a running local server, all file operations and mod tree queries fail, preventing code inspection and mod development.
+- **Correction**:
+  - Implement a persistent, client-side Virtual File System (`vfs.ts`) using IndexedDB (with `localStorage` fallback) pre-seeded with project files (e.g., `mods/arm32-fix/` and `godhand/` templates).
+  - Wrap API routes in `api.ts` to transparently route to the VFS when the local server is offline or returns HTML fallbacks.
+  - Integrate native HTML5 `showDirectoryPicker` / folder uploads and client-side ZIP/JAR packaging (`JSZip`) so users can develop, import, and export complete mod packages directly in the browser with zero backend requirements.
+
+### 10. Chromium Private Network Access (PNA) Preflight & Relative Asset Paths
+- **Problem**: Chromium blocks cross-origin requests from public HTTPS origins (e.g. `*.web.app`) to private local network endpoints (`http://localhost:3000`) unless preflights explicitly return `Access-Control-Allow-Private-Network: true`. Additionally, Vite absolute paths (`/assets/...`) break on subpath static hosts like GitHub Pages (`https://<user>.github.io/<repo>/`).
+- **Correction**:
+  - In Express, register PNA header injection middleware *before* the CORS middleware so preflight `OPTIONS` requests receive `Access-Control-Allow-Private-Network: true` with HTTP 204.
+  - In `vite.config.ts`, set `base: './'` to enforce relative asset paths for universal portability across GitHub Pages, Firebase Hosting, and local Express static serving.
+  - Utilize `HashRouter` for client-side routing on static CDNs to eliminate 404 Not Found errors on deep link reloads.
+
+
 
