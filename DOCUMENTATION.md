@@ -327,11 +327,28 @@ GodHand Studio is fully provisioned and deployed to global edge CDNs via Firebas
 - **Automatic OAuth Whitelisting**: The project's `.web.app` and `.firebaseapp.com` domains are automatically pre-authorized by Google Cloud / Firebase Authentication, enabling instant Google Single Sign-On without manual console configuration.
 - **Continuous Deployment Command**:
   ```powershell
-  npm run build --prefix dashboard
-  npx -y firebase-tools deploy --only hosting
-  ```
 
+---
 
+## 23. Local Launchers, Cloud Hybrid Bridge & Client-Side Auto-Scan
 
+### Localhost 1-Click Launchers
+GodHand includes dedicated local launcher scripts to spin up the Node.js Express server on port 3000 and immediately launch the default browser:
+- **Windows Batch**: Double-click `start-godhand.bat` from File Explorer or run in terminal.
+- **PowerShell**: Execute `.\launch-godhand.ps1`.
+- **Local IDE URL**: [http://localhost:3000](http://localhost:3000)
 
+### Cloud Hybrid Bridge & Safe Content-Type Verification
+When accessing GodHand through static cloud hosting (e.g. Firebase Hosting):
+- The `apiFetch` client automatically validates that API responses have `content-type: application/json`. If static hosting serves `index.html` (HTML fallback), it prevents `SyntaxError: JSON.parse` crashes.
+- The `<LocalhostBanner />` alerts users that local compiling and file access require the local server, providing a 1-click redirect button to `http://localhost:3000`.
 
+### Real-Time Client-Side Auto-Scan & Typo Repair
+- **Zero Network Latency**: Built directly into `dashboard/src/lib/diagnostics.ts`, the diagnostic scanner inspects Java code synchronously on every keystroke (debounced 400ms).
+- **Checks Performed**: Common Java keyword typos (`pubilc`, `staic`, `viod`, `calss`, `Strign`), unclosed block braces, string quotes, and missing semicolons.
+- **1-Click Auto-Fix**: Automatically replaces typos and missing semicolons without requiring server round-trips.
+
+### In-Browser RunClient Gameplay Simulation
+- **60 FPS Canvas Viewport**: Visualizes Minecraft Fabric mod execution with animated voxel terrain, player HUD, crosshair, and performance statistics.
+- **Hold-to-Peek Terminal**: Hold down the terminal button (`onMouseDown` / `onTouchStart`) to inspect live Gradle Loom logs in real time; release to resume game view.
+- **Mod Status**: Real-time indicator displaying `GodHand Fabric Mod 1.21.1 Loaded`.
