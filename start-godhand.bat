@@ -16,6 +16,20 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+if not exist "dashboard\node_modules" (
+    echo [*] dashboard\node_modules not found. Installing frontend dependencies...
+    call npm --prefix dashboard install
+)
+
+if not exist "dashboard\dist\index.html" (
+    echo [*] dashboard\dist not found. Compiling frontend bundle...
+    call npm run build --prefix dashboard
+)
+
+echo.
+echo [*] Tip: Run 'npx --yes cloudflared tunnel --url http://localhost:3000'
+echo     to connect localhost with https://project-910a2a4c-fa54-4621-b21.web.app
+echo.
 echo [*] Starting local GodHand server on http://localhost:3000...
 start "" "http://localhost:3000"
 

@@ -347,6 +347,29 @@ export const SystemCoreMods: React.FC = () => {
     }
   };
 
+  // 6b. Download Mod JAR via Blob URL
+  const handleDownloadModJar = async (mod: SystemMod) => {
+    try {
+      const res = await fetch(`/api/system-mods/${mod.id}/download`);
+      if (!res.ok) {
+        toast.error(language === 'de' ? 'Mod-JAR wurde noch nicht kompiliert!' : 'Mod JAR has not been compiled yet!');
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = mod.jarName || `${mod.id}-1.0.0.jar`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success(language === 'de' ? 'Download gestartet' : 'Download started');
+    } catch (err: any) {
+      toast.error(err.message || 'Error downloading mod JAR');
+    }
+  };
+
   // 7. Scaffold New Mod
   const handleCreateMod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -654,7 +677,7 @@ export const SystemCoreMods: React.FC = () => {
               <span>{t('createNewMod')}</span>
             </button>
             <a
-              href={`/ide/core-${selectedModId}`}
+              href={`#/ide/core-${selectedModId}`}
               target="_blank"
               rel="noreferrer"
               className="px-3 py-1.5 bg-[#202028] hover:bg-[#282834] text-slate-300 hover:text-white border border-[#2d2d38] rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors"
@@ -769,13 +792,13 @@ export const SystemCoreMods: React.FC = () => {
               </button>
 
               {/* Download JAR */}
-              <a
-                href={`/api/system-mods/${selectedMod.id}/download`}
-                download={selectedMod.jarName}
+              <button
+                onClick={() => selectedMod && handleDownloadModJar(selectedMod)}
+                disabled={!selectedMod.jarExists}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors ${
                   selectedMod.jarExists
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-                    : 'bg-slate-800 text-slate-500 pointer-events-none border border-slate-700'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm cursor-pointer'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
                 title={selectedMod.jarExists ? `Download ${selectedMod.jarName}` : 'Compile mod first'}
               >
@@ -783,7 +806,7 @@ export const SystemCoreMods: React.FC = () => {
                 <span>
                   {t('downloadModJar')} {selectedMod.jarSize > 0 ? `(${(selectedMod.jarSize / 1024).toFixed(1)} KB)` : ''}
                 </span>
-              </a>
+              </button>
             </div>
           </div>
         )}

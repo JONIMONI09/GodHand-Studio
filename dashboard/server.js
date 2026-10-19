@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { exec, spawn, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -28,14 +27,50 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+const allowedOrigins = [
+  'https://project-910a2a4c-fa54-4621-b21.web.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
+];
+
+// Browser Private Network Access headers (must run before cors so preflight OPTIONS include the header)
+app.use((req, res, next) => {
+  if (req.headers['access-control-request-private-network'] || req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+  next();
+});
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.trycloudflare.com') ||
+      origin.endsWith('.web.app') ||
+      origin.endsWith('.firebaseapp.com') ||
+      origin.endsWith('.github.io') ||
+      origin.endsWith('.koyeb.app') ||
+      origin.endsWith('.onrender.com') ||
+      origin.endsWith('.hf.space')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
 // State for Gradle and MC Server
 let buildStatus = 'idle'; // idle, building, success, failed
 let buildLogs = [];
+let buildProcess = null;
 let serverStatus = 'offline'; // offline, starting, online, failed
 let serverLogs = [];
 let serverProcess = null;
@@ -299,7 +334,7 @@ app.post('/api/build', async (req, res) => {
     const JAVA_HOME = await ensureJDK();
     const gradlewBin = path.join(ROOT_DIR, 'godhand', 'gradlew');
     ensureGradlewExecutable();
-    const buildProcess = spawn(gradlewBin, gradleArgs, {
+    buildProcess = spawn(gradlewBin, gradleArgs, {
       cwd: path.join(ROOT_DIR, 'godhand'),
       env: { ...process.env, JAVA_HOME, PATH: `${JAVA_HOME}/bin:${process.env.PATH}` }
     });
@@ -324,12 +359,27 @@ app.post('/api/build', async (req, res) => {
         buildStatus = 'failed';
         buildLogs.push(`BUILD FAILED with exit code ${code}`);
       }
+      buildProcess = null;
       resetJdkIdleTimer();
     });
   } catch (err) {
     buildStatus = 'failed';
     buildLogs.push('[ERROR] ' + err.message);
+    buildProcess = null;
   }
+});
+
+app.post('/api/build/cancel', (req, res) => {
+  if (buildProcess) {
+    try {
+      buildProcess.kill('SIGTERM');
+    } catch (_) {}
+    buildStatus = 'failed';
+    buildLogs.push('[INFO] Build cancelled by user.');
+    buildProcess = null;
+    return res.json({ success: true, message: 'Build cancelled' });
+  }
+  res.json({ success: false, message: 'No build currently running' });
 });
 
 // 4. API: Run Minecraft Dedicated Server (Headless)
@@ -662,9 +712,8 @@ function buildTree(dirPath, basePath, currentDepth = 0) {
   return result;
 }
 
-function resolveAndCheckPath(filePath) {
+function resolveAndCheckPath(filePath, projectBase = path.resolve(ROOT_DIR, 'godhand')) {
   if (!filePath || typeof filePath !== 'string') return null;
-  const projectBase = path.resolve(ROOT_DIR, 'godhand');
   // Strip leading slashes to prevent path.resolve treating it as filesystem root
   const cleaned = filePath.replace(/^[/\\]+/, '');
   const fullPath = path.resolve(projectBase, cleaned);
@@ -673,16 +722,22 @@ function resolveAndCheckPath(filePath) {
 }
 
 app.get('/api/fs/tree', (req, res) => {
-  const projectBase = path.join(ROOT_DIR, 'godhand');
+  const project = req.query.projectId || req.query.project;
+  const projectBase = project ? getSystemModDir(project) : path.join(ROOT_DIR, 'godhand');
+  if (!fs.existsSync(projectBase)) {
+    return res.status(404).json({ error: 'Project directory not found' });
+  }
   const tree = buildTree(projectBase, projectBase);
   res.json({ tree });
 });
 
 app.get('/api/fs/file', (req, res) => {
   const { path: filePath } = req.query;
+  const project = req.query.projectId || req.query.project;
   if (!filePath) return res.status(400).json({ error: 'Path is required' });
   
-  const fullPath = resolveAndCheckPath(filePath);
+  const projectBase = project ? getSystemModDir(project) : path.resolve(ROOT_DIR, 'godhand');
+  const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
@@ -694,10 +749,11 @@ app.get('/api/fs/file', (req, res) => {
 });
 
 app.post('/api/fs/file', (req, res) => {
-  const { path: filePath, content } = req.body;
+  const { path: filePath, content, projectId, project } = req.body;
   if (!filePath || content === undefined) return res.status(400).json({ error: 'Path and content are required' });
   
-  const fullPath = resolveAndCheckPath(filePath);
+  const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
+  const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   // Quota check: prevent files larger than 5MB
@@ -719,13 +775,14 @@ app.post('/api/fs/file', (req, res) => {
 });
 
 app.post('/api/fs/move', (req, res) => {
-  const { sourcePath, destinationPath } = req.body;
+  const { sourcePath, destinationPath, projectId, project } = req.body;
   if (!sourcePath || !destinationPath) {
     return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
   }
 
-  const srcFullPath = resolveAndCheckPath(sourcePath);
-  let destFullPath = resolveAndCheckPath(destinationPath);
+  const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
+  const srcFullPath = resolveAndCheckPath(sourcePath, projectBase);
+  let destFullPath = resolveAndCheckPath(destinationPath, projectBase);
 
   if (!srcFullPath || !destFullPath) {
     return res.status(403).json({ error: 'Invalid or restricted path access' });
@@ -758,7 +815,6 @@ app.post('/api/fs/move', (req, res) => {
     }
 
     fs.renameSync(srcFullPath, destFullPath);
-    const projectBase = path.resolve(ROOT_DIR, 'godhand');
     const relativeNewPath = path.relative(projectBase, destFullPath).replace(/\\/g, '/');
     res.json({ success: true, oldPath: sourcePath, newPath: relativeNewPath });
   } catch (err) {
@@ -1034,7 +1090,11 @@ app.get('/api/git/diff', async (req, res) => {
 
 app.get('/api/fs/folders', (req, res) => {
   try {
-    const projectBase = path.resolve(ROOT_DIR, 'godhand');
+    const project = req.query.projectId || req.query.project;
+    const projectBase = project ? getSystemModDir(project) : path.resolve(ROOT_DIR, 'godhand');
+    if (!fs.existsSync(projectBase)) {
+      return res.status(404).json({ error: 'Project directory not found' });
+    }
     const folders = ['']; // root directory is represented by ''
 
     function scanDirs(dir) {
@@ -1400,6 +1460,78 @@ app.delete('/api/system-mods/:id/file', (req, res) => {
       fs.unlinkSync(resolved);
     }
     res.json({ success: true, path: relativePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/system-mods/:id/folders', (req, res) => {
+  const modDir = getSystemModDir(req.params.id);
+  if (!fs.existsSync(modDir)) {
+    return res.status(404).json({ error: 'Mod directory not found' });
+  }
+  try {
+    const folders = [''];
+    function scanDirs(dir) {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (entry.name === '.git' || entry.name === 'build' || entry.name === '.gradle' || entry.name === 'node_modules') continue;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(modDir, fullPath).replace(/\\/g, '/');
+          folders.push(relPath);
+          scanDirs(fullPath);
+        }
+      }
+    }
+    scanDirs(modDir);
+    res.json({ folders });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system-mods/:id/move', (req, res) => {
+  const modDir = getSystemModDir(req.params.id);
+  if (!fs.existsSync(modDir)) {
+    return res.status(404).json({ error: 'Mod directory not found' });
+  }
+  const { sourcePath, destinationPath } = req.body;
+  if (!sourcePath || !destinationPath) {
+    return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
+  }
+
+  const cleanSrc = sourcePath.replace(/^[/\\]+/, '');
+  const cleanDst = destinationPath.replace(/^[/\\]+/, '');
+  const srcFullPath = path.resolve(modDir, cleanSrc);
+  let destFullPath = path.resolve(modDir, cleanDst);
+
+  if (!srcFullPath.startsWith(modDir) || !destFullPath.startsWith(modDir)) {
+    return res.status(403).json({ error: 'Invalid or restricted path access' });
+  }
+  if (!fs.existsSync(srcFullPath)) {
+    return res.status(404).json({ error: 'Source file or folder not found' });
+  }
+  if (fs.existsSync(destFullPath) && fs.statSync(destFullPath).isDirectory()) {
+    if (path.basename(destFullPath) !== path.basename(srcFullPath)) {
+      destFullPath = path.join(destFullPath, path.basename(srcFullPath));
+    }
+  }
+  if (srcFullPath === destFullPath) {
+    return res.json({ success: true, message: 'Source and destination are the same' });
+  }
+  if (destFullPath.startsWith(srcFullPath + path.sep)) {
+    return res.status(400).json({ error: 'Cannot move a folder into its own subdirectory' });
+  }
+
+  try {
+    const destDir = path.dirname(destFullPath);
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    fs.renameSync(srcFullPath, destFullPath);
+    const relNewPath = path.relative(modDir, destFullPath).replace(/\\/g, '/');
+    res.json({ success: true, oldPath: sourcePath, newPath: relNewPath });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2240,22 +2372,34 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'API route not found' });
 });
 
-// Serve frontend in Dev/Production
-async function startServer() {
-  const isProd = process.env.NODE_ENV === 'production';
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist/index.html'));
-    });
-  }
+// Serve frontend in Dev/Production with SPA catch-all and self-healing build
+const distDir = path.join(__dirname, 'dist');
+const distIndex = path.join(distDir, 'index.html');
 
+// Automated pre-build check: ensure dist/index.html exists
+if (!fs.existsSync(distIndex)) {
+  console.log('[GodHand] dist/index.html not found, executing automated pre-build...');
+  try {
+    execSync('npm run build', { cwd: __dirname, stdio: 'inherit' });
+  } catch (err) {
+    console.error('[GodHand] Automated pre-build failed:', err.message);
+  }
+}
+
+app.use(express.static(distDir));
+
+// Non-API SPA catch-all route
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  if (fs.existsSync(distIndex)) {
+    return res.sendFile(distIndex);
+  }
+  res.status(200).send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>GodHand Studio - Building</title><meta http-equiv="refresh" content="3"></head><body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;"><h2>GodHand Studio is building...</h2><p>Please wait a few seconds. The page will reload automatically.</p></div></body></html>`);
+});
+
+async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Full-stack server listening on http://localhost:${PORT}`);
   });

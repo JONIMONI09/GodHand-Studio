@@ -474,15 +474,16 @@ function IDE() {
     }
     const fullPath = folderPath ? `${folderPath}/${newFileName}` : newFileName;
     try {
-      await fetch('/api/fs/file', {
+      const url = isCoreMod && coreModId
+        ? `/api/system-mods/${coreModId}/file`
+        : '/api/fs/file';
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: fullPath, content: '// Neuer Inhalt' })
       });
       // Refresh tree
-      const res = await fetch('/api/fs/tree');
-      const data = await res.json();
-      setFileTree(data.tree || []);
+      await refreshFileTree();
       setCreatingFileIn(null);
       setNewFileName('');
       setActiveFile(fullPath);
@@ -504,7 +505,10 @@ function IDE() {
 
   const fetchFolders = async () => {
     try {
-      const res = await fetch('/api/fs/folders');
+      const url = isCoreMod && coreModId
+        ? `/api/system-mods/${coreModId}/folders`
+        : '/api/fs/folders';
+      const res = await fetch(url);
       const data = await res.json();
       if (data.folders) setAvailableFolders(data.folders);
     } catch (e) {
@@ -535,10 +539,13 @@ function IDE() {
     }
 
     try {
-      const res = await fetch('/api/fs/move', {
+      const moveUrl = isCoreMod && coreModId
+        ? `/api/system-mods/${coreModId}/move`
+        : '/api/fs/move';
+      const res = await fetch(moveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath: moveTargetNode.path, destinationPath })
+        body: JSON.stringify({ sourcePath: moveTargetNode.path, destinationPath, projectId: coreModId || 'godhand' })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -552,9 +559,7 @@ function IDE() {
         setActiveFile(destinationPath + activeFile.substring(moveTargetNode.path.length));
       }
 
-      const treeRes = await fetch('/api/fs/tree');
-      const treeData = await treeRes.json();
-      setFileTree(treeData.tree || []);
+      await refreshFileTree();
 
       if (selectedTargetFolder) {
         setExpandedFolders(prev => new Set(prev).add(selectedTargetFolder));
@@ -576,10 +581,13 @@ function IDE() {
     const destinationPath = targetFolder ? `${targetFolder}/${fileName}` : fileName;
 
     try {
-      const res = await fetch('/api/fs/move', {
+      const moveUrl = isCoreMod && coreModId
+        ? `/api/system-mods/${coreModId}/move`
+        : '/api/fs/move';
+      const res = await fetch(moveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath: node.path, destinationPath })
+        body: JSON.stringify({ sourcePath: node.path, destinationPath, projectId: coreModId || 'godhand' })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -593,9 +601,7 @@ function IDE() {
         setActiveFile(destinationPath + activeFile.substring(node.path.length));
       }
 
-      const treeRes = await fetch('/api/fs/tree');
-      const treeData = await treeRes.json();
-      setFileTree(treeData.tree || []);
+      await refreshFileTree();
 
       if (targetFolder) {
         setExpandedFolders(prev => new Set(prev).add(targetFolder));
@@ -823,10 +829,13 @@ function IDE() {
         }
 
         try {
-          const res = await fetch('/api/fs/move', {
+          const moveUrl = isCoreMod && coreModId
+            ? `/api/system-mods/${coreModId}/move`
+            : '/api/fs/move';
+          const res = await fetch(moveUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourcePath, destinationPath })
+            body: JSON.stringify({ sourcePath, destinationPath, projectId: coreModId || 'godhand' })
           });
           const data = await res.json();
           if (!res.ok) {
@@ -841,7 +850,10 @@ function IDE() {
             setActiveFile(destinationPath + activeFile.substring(sourcePath.length));
           }
 
-          const treeRes = await fetch('/api/fs/tree');
+          const treeUrl = isCoreMod && coreModId
+            ? `/api/system-mods/${coreModId}/tree`
+            : '/api/fs/tree';
+          const treeRes = await fetch(treeUrl);
           const treeData = await treeRes.json();
           const newTree = treeData.tree || [];
           setFileTree(newTree);
@@ -903,10 +915,13 @@ function IDE() {
     }
 
     try {
-      const res = await fetch('/api/fs/move', {
+      const moveUrl = isCoreMod && coreModId
+        ? `/api/system-mods/${coreModId}/move`
+        : '/api/fs/move';
+      const res = await fetch(moveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath, destinationPath })
+        body: JSON.stringify({ sourcePath, destinationPath, projectId: coreModId || 'godhand' })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -922,9 +937,7 @@ function IDE() {
         setActiveFile(updatedActiveFile);
       }
 
-      const treeRes = await fetch('/api/fs/tree');
-      const treeData = await treeRes.json();
-      setFileTree(treeData.tree || []);
+      await refreshFileTree();
 
       if (targetFolder) {
         setExpandedFolders(prev => new Set(prev).add(targetFolder));
@@ -968,11 +981,15 @@ function IDE() {
         isBuilding={isBuilding}
         handleBuild={() => handleBuild()}
         onNavigateDashboard={() => navigate('/dashboard')}
+        onRefreshTree={refreshFileTree}
+        onSelectMod={(newId) => navigate(`/ide/${newId}`)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Modular Collapsible & Responsive File Explorer */}
         <IDEFileExplorer
+          onRefreshTree={refreshFileTree}
+          projectId={isCoreMod && coreModId ? coreModId : (projectId || 'godhand')}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={toggleSidebarCollapse}
           sidebarWidth={sidebarWidth}
@@ -1674,7 +1691,15 @@ function Dashboard() {
         toast.error("JAR file has not been compiled yet! The developer must build the mod first.");
         return;
       }
-      window.location.href = '/api/download-jar';
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'godhand-1.0.0.jar';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
     } catch (err) {
       toast.error("Error downloading the JAR.");
     }
@@ -1686,20 +1711,7 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {isBackendOffline && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
-            <div className="h-16 w-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-              <ShieldAlert className="h-8 w-8" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">{t('backendOfflineTitle')}</h2>
-            <p className="text-slate-400 mb-6">{t('backendOfflineDesc')}</p>
-            <button onClick={() => window.location.reload()} className="bg-rose-500 hover:bg-rose-600 text-white px-6 py-2.5 rounded-lg font-medium transition-colors w-full">
-              {t('reload')}
-            </button>
-          </div>
-        </div>
-      )}
+      {isBackendOffline && <BackendOfflineModal />}
       <header className="border-b border-slate-800 bg-slate-900/50 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <Code className="h-6 w-6 text-emerald-400 shrink-0" />
@@ -2192,6 +2204,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/admin" element={<Admin />} />
+      <Route path="/ide" element={<Navigate to="/ide/godhand" replace />} />
       <Route path="/ide/:projectId" element={<IDE />} />
       <Route path="/mod/:id" element={<ModDetails />} />
       <Route path="/user/:userId" element={<UserProfile />} />

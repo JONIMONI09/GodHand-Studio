@@ -17,10 +17,23 @@ import {
   Maximize2, 
   Minimize2,
   MoreVertical,
-  ChevronDown
+  ChevronDown,
+  Plus,
+  Cloud,
+  FolderDown,
+  Sparkles,
+  ExternalLink,
+  RefreshCw,
+  CheckCircle2,
+  Box,
+  Layers,
+  Terminal,
+  Cpu
 } from 'lucide-react';
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useTranslation } from '../../i18n/translations';
+import { BrowserVFS } from '../../lib/vfs';
+import { toast } from 'react-hot-toast';
 
 interface IDEHeaderProps {
   projectId?: string;
@@ -46,6 +59,8 @@ interface IDEHeaderProps {
   isBuilding: boolean;
   handleBuild: () => void;
   onNavigateDashboard: () => void;
+  onRefreshTree?: () => Promise<void>;
+  onSelectMod?: (modId: string) => void;
 }
 
 export const IDEHeader: React.FC<IDEHeaderProps> = ({
@@ -72,9 +87,156 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
   isBuilding,
   handleBuild,
   onNavigateDashboard,
+  onRefreshTree,
+  onSelectMod
 }) => {
   const { t, language } = useTranslation();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // New Mod Generator Modal State
+  const [showNewModModal, setShowNewModModal] = useState(false);
+  const [newModId, setNewModId] = useState('');
+  const [newModName, setNewModName] = useState('');
+  const [newModLoader, setNewModLoader] = useState<'fabric' | 'neoforge' | 'forge'>('fabric');
+  const [newModMcVersion, setNewModMcVersion] = useState('1.21.1');
+  const [newModDesc, setNewModDesc] = useState('');
+  const [isScaffolding, setIsScaffolding] = useState(false);
+
+  // Cloud Compiler & Mod Packager Modal State
+  const [showCloudBuildModal, setShowCloudBuildModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [githubPat, setGithubPat] = useState('');
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState(false);
+
+  const handleCreateNewMod = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newModId.trim()) {
+      toast.error(language === 'de' ? 'Bitte eine Mod-ID eingeben!' : 'Please enter a Mod ID!');
+      return;
+    }
+    const cleanId = newModId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    setIsScaffolding(true);
+
+    try {
+      // 1. Scaffold directly in VFS
+      await BrowserVFS.scaffoldMod({
+        id: cleanId,
+        name: newModName.trim() || cleanId,
+        loader: newModLoader,
+        mcVersion: newModMcVersion,
+        description: newModDesc.trim() || `Minecraft ${newModLoader} Mod created with GodHand Studio.`
+      });
+
+      // 2. Also try server scaffolding if connected
+      fetch('/api/system-mods/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: cleanId,
+          name: newModName.trim() || cleanId,
+          loader: newModLoader,
+          mcVersion: newModMcVersion,
+          description: newModDesc.trim()
+        })
+      }).catch(() => {});
+
+      toast.success(language === 'de' ? `Mod "${cleanId}" erfolgreich generiert!` : `Mod "${cleanId}" scaffolded successfully!`);
+      setShowNewModModal(false);
+      setNewModId('');
+      setNewModName('');
+      setNewModDesc('');
+
+      if (onRefreshTree) await onRefreshTree();
+      if (onSelectMod) onSelectMod(cleanId);
+    } catch (err: any) {
+      toast.error('Scaffolding failed: ' + err.message);
+    } finally {
+      setIsScaffolding(false);
+    }
+  };
+
+  const handleExportZip = async () => {
+    setIsExporting(true);
+    try {
+      const activeProj = projectId || 'godhand';
+      const blob = await BrowserVFS.exportZip(activeProj);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeProj}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(language === 'de' ? 'Projekt als .zip heruntergeladen!' : 'Downloaded project as .zip!');
+    } catch (err: any) {
+      toast.error('Export failed: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportJar = async () => {
+    setIsExporting(true);
+    try {
+      const activeProj = projectId || 'godhand';
+      const blob = await BrowserVFS.exportJar(activeProj);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeProj}.jar`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(language === 'de' ? 'Mod-Bundle (.jar) erfolgreich generiert!' : 'Mod bundle (.jar) packaged successfully!');
+    } catch (err: any) {
+      toast.error('Export failed: ' + err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleTriggerGitHubAction = async () => {
+    setIsDispatching(true);
+    setDispatchSuccess(false);
+
+    try {
+      if (!githubPat.trim()) {
+        window.open('https://github.com/JONIMONI09/GodHand-Studio/actions/workflows/gradle.yml', '_blank');
+        toast(language === 'de' ? 'GitHub Actions Workflow geöffnet. Klicken Sie auf "Run workflow".' : 'Opened GitHub Actions. Click "Run workflow" to trigger build.', { icon: '🚀' });
+        return;
+      }
+
+      const res = await fetch('https://api.github.com/repos/JONIMONI09/GodHand-Studio/actions/workflows/gradle.yml/dispatches', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${githubPat.trim()}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ref: 'main',
+          inputs: {
+            targetMod: projectId || 'godhand'
+          }
+        })
+      });
+
+      if (res.ok || res.status === 204) {
+        setDispatchSuccess(true);
+        toast.success(language === 'de' ? 'GitHub Actions Cloud Build ausgelöst!' : 'GitHub Actions Cloud Build triggered!');
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Status: ${res.status}`);
+      }
+    } catch (err: any) {
+      toast.error('Workflow dispatch error: ' + err.message);
+    } finally {
+      setIsDispatching(false);
+    }
+  };
 
   return (
     <header className="flex-shrink-0 border-b border-[#2d2d2d] bg-[#252526] flex flex-row items-center justify-between px-2 sm:px-3 h-14 gap-2 relative z-30 select-none">
@@ -129,6 +291,16 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
           </span>
         )}
 
+        {/* Create New Mod Button */}
+        <button
+          onClick={() => setShowNewModModal(true)}
+          className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 hover:text-white rounded text-xs font-medium transition"
+          title={t('createNewMod')}
+        >
+          <Plus className="h-3.5 w-3.5 text-indigo-400" />
+          <span className="hidden md:inline">{t('createNewMod')}</span>
+        </button>
+
         {/* Quick Console Toggle Button in Header */}
         <button
           onClick={onToggleTerminal}
@@ -162,7 +334,7 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
           <select
             value={javaVersion}
             onChange={(e) => setJavaVersion(e.target.value)}
-            className="bg-transparent text-white text-xs font-mono outline-none cursor-pointer py-1"
+            className="bg-transparent text-white text-xs font-mono outline-hidden cursor-pointer py-1"
             title={t('javaVersion')}
           >
             <option value="17" className="bg-[#252526] text-white">{t('java17')}</option>
@@ -178,7 +350,7 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
           onClick={() => setShowGitStudio(!showGitStudio)} 
           className={`flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 rounded transition-colors flex-shrink-0 text-xs font-medium ${
             showGitStudio 
-              ? 'bg-indigo-600 text-white font-semibold shadow-sm' 
+              ? 'bg-indigo-600 text-white font-semibold shadow-xs' 
               : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
           }`} 
           title={t('gitStudio')}
@@ -198,11 +370,21 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
           <span className="hidden sm:inline ml-1.5">{isSaving ? t('saving') : t('save')}</span>
         </button>
 
+        {/* Cloud Compiler & Export Button */}
+        <button
+          onClick={() => setShowCloudBuildModal(true)}
+          className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0 text-xs font-medium"
+          title="Cloud Build & Export"
+        >
+          <Cloud className="h-4 w-4 text-indigo-200 shrink-0" />
+          <span className="hidden lg:inline ml-1.5">{language === 'de' ? 'Cloud & Export' : 'Cloud & Export'}</span>
+        </button>
+
         {/* Build Mod Button (Primary CTA) */}
         <button 
           onClick={handleBuild}
           disabled={isBuilding}
-          className="flex items-center justify-center p-1.5 sm:px-3 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded transition-colors flex-shrink-0 text-xs font-semibold shadow-sm"
+          className="flex items-center justify-center p-1.5 sm:px-3 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded transition-colors flex-shrink-0 text-xs font-semibold shadow-xs"
           title={t('buildMod')}
         >
           <Play className={`h-4 w-4 shrink-0 ${isBuilding ? 'animate-spin' : ''}`} />
@@ -212,14 +394,14 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
         {/* Secondary Action Buttons (visible on large screens) */}
         <div className="hidden lg:flex items-center space-x-1.5">
           {/* Download JAR */}
-          <a 
-            href="/api/download-jar" 
-            className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] rounded transition-colors text-slate-300 hover:text-white no-underline flex-shrink-0 text-xs font-medium" 
+          <button 
+            onClick={handleExportJar}
+            className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] rounded transition-colors text-slate-300 hover:text-white flex-shrink-0 text-xs font-medium" 
             title={t('downloadJar')}
           >
             <Download className="h-4 w-4 shrink-0" />
             <span className="hidden xl:inline ml-1.5">JAR</span>
-          </a>
+          </button>
 
           {/* Make Public (Restricted for Core Mods) */}
           {!isCoreMod ? (
@@ -258,45 +440,39 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
           >
             <BookOpen className="h-4 w-4 text-emerald-400 shrink-0" />
           </button>
-
-          {/* Report (Restricted for Core Mods) */}
-          {!isCoreMod && (
-            <button 
-              onClick={() => setShowReportModal(true)} 
-              className="flex items-center justify-center p-1.5 sm:px-2 sm:py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded transition-colors flex-shrink-0 text-xs font-medium" 
-              title={t('report')}
-            >
-              <Flag className="h-4 w-4 shrink-0" />
-            </button>
-          )}
         </div>
 
-        {/* More Actions Overflow Menu (for screens < 1024px) */}
-        <div className="relative lg:hidden">
-          <button
-            onClick={() => setShowMoreMenu(!showMoreMenu)}
-            className="p-1.5 rounded hover:bg-[#3c3c3c] text-slate-300 hover:text-white transition-colors"
+        {/* Mobile & Small Screen Overflow Menu */}
+        <div className="lg:hidden relative">
+          <button 
+            onClick={() => setShowMoreMenu(!showMoreMenu)} 
+            className="p-1.5 sm:p-2 bg-[#3c3c3c] hover:bg-[#4c4c4c] text-slate-200 rounded transition-colors"
             title="More Options"
           >
             <MoreVertical className="h-4 w-4" />
           </button>
 
           {showMoreMenu && (
-            <div 
-              className="absolute right-0 top-10 w-48 bg-[#1e1e24] border border-[#3c3c44] rounded-xl shadow-2xl py-1.5 z-50 text-xs font-medium"
-              onClick={() => setShowMoreMenu(false)}
-            >
-              <a 
-                href="/api/download-jar" 
-                className="w-full px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+            <div className="absolute right-0 mt-2 w-48 bg-[#252526] border border-[#3c3c3c] rounded shadow-xl py-1 z-50 text-xs font-medium">
+              <button
+                onClick={() => { setShowMoreMenu(false); setShowCloudBuildModal(true); }}
+                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
               >
-                <Download className="h-3.5 w-3.5 text-indigo-400" />
+                <Cloud className="h-3.5 w-3.5 text-indigo-400" />
+                <span>Cloud Build & Export</span>
+              </button>
+
+              <button
+                onClick={() => { setShowMoreMenu(false); handleExportJar(); }}
+                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-400" />
                 <span>{t('downloadJar')}</span>
-              </a>
+              </button>
 
               {!isCoreMod && (
                 <button 
-                  onClick={() => setShowPublishModal(true)} 
+                  onClick={() => { setShowMoreMenu(false); setShowPublishModal(true); }} 
                   className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
                 >
                   <Globe className="h-3.5 w-3.5 text-indigo-400" />
@@ -305,7 +481,7 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
               )}
 
               <button 
-                onClick={() => setShowSupportModal(true)} 
+                onClick={() => { setShowMoreMenu(false); setShowSupportModal(true); }} 
                 className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
               >
                 <LifeBuoy className="h-3.5 w-3.5 text-indigo-400" />
@@ -313,26 +489,228 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
               </button>
 
               <button 
-                onClick={() => setShowDocsModal(true)} 
+                onClick={() => { setShowMoreMenu(false); setShowDocsModal(true); }} 
                 className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
               >
                 <BookOpen className="h-3.5 w-3.5 text-emerald-400" />
                 <span>{t('documentation')}</span>
               </button>
-
-              {!isCoreMod && (
-                <button 
-                  onClick={() => setShowReportModal(true)} 
-                  className="w-full text-left px-3 py-2 flex items-center space-x-2 text-rose-400 hover:bg-rose-500/10 transition-colors"
-                >
-                  <Flag className="h-3.5 w-3.5" />
-                  <span>{t('report')}</span>
-                </button>
-              )}
             </div>
           )}
         </div>
       </div>
+
+      {/* CREATE NEW MOD WIZARD MODAL */}
+      {showNewModModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#1e1e1e] border border-slate-700 rounded-xl shadow-2xl max-w-md w-full overflow-hidden text-slate-200">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+              <div className="flex items-center gap-2">
+                <Box className="h-5 w-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-sm">{t('createNewMod')}</h3>
+              </div>
+              <button onClick={() => setShowNewModModal(false)} className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateNewMod} className="p-5 space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">{t('modId')}</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="z.B. super-tools"
+                  value={newModId}
+                  onChange={(e) => setNewModId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white font-mono text-xs focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">{t('modName')}</label>
+                <input
+                  type="text"
+                  placeholder="z.B. Super Tools Mod"
+                  value={newModName}
+                  onChange={(e) => setNewModName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">{t('modLoader')}</label>
+                  <select
+                    value={newModLoader}
+                    onChange={(e: any) => setNewModLoader(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-2 text-white text-xs focus:outline-hidden focus:border-indigo-500"
+                  >
+                    <option value="fabric">Fabric (Loom)</option>
+                    <option value="neoforge">NeoForge</option>
+                    <option value="forge">Forge</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Minecraft</label>
+                  <input
+                    type="text"
+                    value={newModMcVersion}
+                    onChange={(e) => setNewModMcVersion(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white font-mono text-xs focus:outline-hidden focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">{t('modDescription')}</label>
+                <textarea
+                  rows={2}
+                  placeholder="Beschreibung des neuen Mods..."
+                  value={newModDesc}
+                  onChange={(e) => setNewModDesc(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-xs focus:outline-hidden focus:border-indigo-500 resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowNewModModal(false)}
+                  className="px-3.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isScaffolding}
+                  className="px-4 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium flex items-center gap-1.5"
+                >
+                  {isScaffolding ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  <span>{t('confirm')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CLOUD COMPILER & MOD PACKAGER MODAL */}
+      {showCloudBuildModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#1e1e1e] border border-slate-700 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden text-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+              <div className="flex items-center gap-2">
+                <Cloud className="h-5 w-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-sm">{language === 'de' ? 'Cloud Compiler & Mod Packager' : 'Cloud Compiler & Mod Packager'}</h3>
+              </div>
+              <button onClick={() => setShowCloudBuildModal(false)} className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {/* Direct In-Browser Bundling */}
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                <span className="font-semibold text-slate-200 block text-xs">
+                  {language === 'de' ? '1. Direkt-Download (100% Im Browser erzeugt, Kein Server nötig)' : '1. Direct Download (In-Browser Packaged, Zero Backend Needed)'}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleExportZip}
+                    disabled={isExporting}
+                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                  >
+                    <FolderDown className="h-4 w-4 text-emerald-400" />
+                    <span>{t('exportProjectZip')}</span>
+                  </button>
+                  <button
+                    onClick={handleExportJar}
+                    disabled={isExporting}
+                    className="flex-1 py-2 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                  >
+                    <Download className="h-4 w-4 text-emerald-400" />
+                    <span>{t('exportProjectJar')}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* GitHub Actions Cloud Compiler */}
+              <div className="bg-slate-900 border border-indigo-500/20 rounded-lg p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    <span>{t('cloudBuildWithGithub')}</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    100% FREE
+                  </span>
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  {t('cloudBuildDesc')}
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="text-slate-400 text-[11px]">
+                    GitHub Personal Access Token (PAT) - optional:
+                  </label>
+                  <input
+                    type="password"
+                    value={githubPat}
+                    onChange={(e) => setGithubPat(e.target.value)}
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono text-xs focus:outline-hidden focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={handleTriggerGitHubAction}
+                    disabled={isDispatching}
+                    className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                  >
+                    {isDispatching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                    <span>{language === 'de' ? 'Workflow starten' : 'Trigger Workflow'}</span>
+                  </button>
+                  <a
+                    href="https://github.com/JONIMONI09/GodHand-Studio/actions"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center gap-1"
+                  >
+                    <span>Actions</span>
+                    <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                  </a>
+                  <a
+                    href="https://github.com/JONIMONI09/GodHand-Studio/releases"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center gap-1"
+                  >
+                    <span>Releases</span>
+                    <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                  </a>
+                </div>
+
+                {dispatchSuccess && (
+                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded text-emerald-300 flex items-center gap-1.5 text-xs">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>{language === 'de' ? 'Build läuft auf GitHub Actions! JAR ist gleich unter Actions/Releases verfügbar.' : 'Build is running on GitHub Actions! JAR will be available under Actions/Releases.'}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/50 flex justify-end text-xs">
+              <button
+                onClick={() => setShowCloudBuildModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition"
+              >
+                {t('close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };
