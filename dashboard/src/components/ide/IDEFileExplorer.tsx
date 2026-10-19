@@ -17,12 +17,19 @@ import {
   X,
   PanelLeftClose,
   PanelLeft,
-  ChevronsUpDown
+  ChevronsUpDown,
+  FolderDown,
+  FolderUp,
+  Upload,
+  Download
 } from 'lucide-react';
 import { useTranslation } from '../../i18n/translations';
 import { toast } from 'react-hot-toast';
+import { BrowserVFS } from '../../lib/vfs';
 
 interface IDEFileExplorerProps {
+  onRefreshTree?: () => Promise<void>;
+  projectId?: string;
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   sidebarWidth: number;
@@ -58,6 +65,8 @@ interface IDEFileExplorerProps {
 }
 
 export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
+  onRefreshTree,
+  projectId,
   isSidebarCollapsed,
   onToggleSidebar,
   sidebarWidth,
@@ -92,6 +101,67 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
   handleFileDrop
 }) => {
   const { t, language } = useTranslation();
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenLocalFolder = async () => {
+    if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await (window as any).showDirectoryPicker();
+        const count = await BrowserVFS.importFromDirectoryHandle(dirHandle, projectId || 'godhand');
+        toast.success(language === 'de' ? `${count} Dateien aus lokalem Ordner geladen!` : `Loaded ${count} files from local folder!`);
+        if (onRefreshTree) await onRefreshTree();
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          toast.error('Failed to open directory: ' + err.message);
+        }
+      }
+    } else {
+      folderInputRef.current?.click();
+    }
+  };
+
+  const handleFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    try {
+      const count = await BrowserVFS.importFromFileList(files, projectId || 'godhand');
+      toast.success(language === 'de' ? `${count} Dateien importiert!` : `Imported ${count} files!`);
+      if (onRefreshTree) await onRefreshTree();
+    } catch (err: any) {
+      toast.error('Import failed: ' + err.message);
+    }
+  };
+
+  const handleZipSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const count = await BrowserVFS.importZip(file, projectId || 'godhand');
+      toast.success(language === 'de' ? `${count} Dateien entpackt!` : `Extracted ${count} files!`);
+      if (onRefreshTree) await onRefreshTree();
+    } catch (err: any) {
+      toast.error('Zip import failed: ' + err.message);
+    }
+  };
+
+  const handleExportZip = async () => {
+    try {
+      const blob = await BrowserVFS.exportZip(projectId || 'godhand');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectId || 'godhand-mod'}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(language === 'de' ? 'Projekt als .zip exportiert!' : 'Project exported as .zip!');
+    } catch (err: any) {
+      toast.error('Export failed: ' + err.message);
+    }
+  };
+
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     'src': true,
     'src/main': true,
@@ -549,6 +619,50 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Hidden native folder and zip inputs */}
+            <input 
+              type="file" 
+              ref={folderInputRef} 
+              {...{ webkitdirectory: '', directory: '' } as any} 
+              multiple 
+              className="hidden" 
+              onChange={handleFolderSelect} 
+            />
+            <input 
+              type="file" 
+              ref={zipInputRef} 
+              accept=".zip,.jar" 
+              className="hidden" 
+              onChange={handleZipSelect} 
+            />
+
+            {/* Open Local Mod Folder (HTML5 File System Access API) */}
+            <button 
+              className="text-slate-400 hover:text-emerald-400 transition-colors p-1 rounded hover:bg-slate-700" 
+              onClick={handleOpenLocalFolder}
+              title={t('openLocalFolder')}
+            >
+              <FolderInput className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Import Project .zip */}
+            <button 
+              className="text-slate-400 hover:text-indigo-400 transition-colors p-1 rounded hover:bg-slate-700" 
+              onClick={() => zipInputRef.current?.click()}
+              title={t('importProjectZip')}
+            >
+              <Upload className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Export Project .zip */}
+            <button 
+              className="text-slate-400 hover:text-amber-400 transition-colors p-1 rounded hover:bg-slate-700" 
+              onClick={handleExportZip}
+              title={t('exportProjectZip')}
+            >
+              <FolderDown className="h-3.5 w-3.5" />
+            </button>
 
             {/* Expand / Collapse All Folders */}
             <button 

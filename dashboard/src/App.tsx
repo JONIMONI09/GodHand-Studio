@@ -968,11 +968,15 @@ function IDE() {
         isBuilding={isBuilding}
         handleBuild={() => handleBuild()}
         onNavigateDashboard={() => navigate('/dashboard')}
+        onRefreshTree={refreshFileTree}
+        onSelectMod={(newId) => navigate(`/ide/${newId}`)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Modular Collapsible & Responsive File Explorer */}
         <IDEFileExplorer
+          onRefreshTree={refreshFileTree}
+          projectId={isCoreMod && coreModId ? coreModId : (projectId || 'godhand')}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={toggleSidebarCollapse}
           sidebarWidth={sidebarWidth}
@@ -1686,20 +1690,7 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {isBackendOffline && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-500/50 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
-            <div className="h-16 w-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-              <ShieldAlert className="h-8 w-8" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">{t('backendOfflineTitle')}</h2>
-            <p className="text-slate-400 mb-6">{t('backendOfflineDesc')}</p>
-            <button onClick={() => window.location.reload()} className="bg-rose-500 hover:bg-rose-600 text-white px-6 py-2.5 rounded-lg font-medium transition-colors w-full">
-              {t('reload')}
-            </button>
-          </div>
-        </div>
-      )}
+      {isBackendOffline && <BackendOfflineModal />}
       <header className="border-b border-slate-800 bg-slate-900/50 px-4 sm:px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <Code className="h-6 w-6 text-emerald-400 shrink-0" />

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { AuthProvider } from './contexts/AuthContext';
@@ -26,11 +26,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthProvider>
       <ActivityProvider>
-        <BrowserRouter>
+        <HashRouter>
           <App />
           <ActivityProgressWidget />
           <Toaster position="bottom-left" toastOptions={{ className: 'bg-slate-800 text-white border border-slate-700' }} />
-        </BrowserRouter>
+        </HashRouter>
       </ActivityProvider>
     </AuthProvider>
   </React.StrictMode>

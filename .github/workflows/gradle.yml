@@ -7,6 +7,12 @@ on:
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "**" ]
+  workflow_dispatch:
+    inputs:
+      targetMod:
+        description: 'Target mod folder to build (e.g. godhand or mods/arm32-fix)'
+        required: false
+        default: 'godhand'
 
 jobs:
   build:

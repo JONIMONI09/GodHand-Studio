@@ -14,12 +14,22 @@ if (-not $nodeCmd) {
     exit 1
 }
 
-$port = 3000
+Set-Location -Path $PSScriptRoot
+
+$distIndex = Join-Path $PSScriptRoot "dashboard\dist\index.html"
+if (-not (Test-Path $distIndex)) {
+    Write-Host "[*] dashboard/dist not found. Compiling frontend bundle..." -ForegroundColor Yellow
+    npm run build --prefix dashboard
+}
+
+$port = if ($env:PORT) { $env:PORT } else { 3000 }
 $url = "http://localhost:$port"
 
+Write-Host "[*] Tip: To connect localhost with https://project-910a2a4c-fa54-4621-b21.web.app," -ForegroundColor Magenta
+Write-Host "    run: npx --yes cloudflared tunnel --url http://localhost:3000" -ForegroundColor Magenta
+Write-Host ""
 Write-Host "[*] Launching browser at $url..." -ForegroundColor Green
 Start-Process $url
 
 Write-Host "[*] Starting Express Server on port $port..." -ForegroundColor Green
-Set-Location -Path $PSScriptRoot
 node dashboard/server.js
