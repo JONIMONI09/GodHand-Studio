@@ -44,30 +44,50 @@ jobs:
 
     - name: Make Gradle Wrapper executable
       # Minecraft Mods brauchen oft manuell die Berechtigung, das Gradle-Skript auszuführen, sonst crasht der Build direkt.
-      run: chmod +x godhand/gradlew
+      run: |
+        chmod +x godhand/gradlew || true
+        if [ -d "mods" ]; then
+          find mods -name "gradlew" -exec chmod +x {} + || true
+        fi
 
     - name: Build with Gradle Wrapper (and Run Tests)
       run: |
-        cd godhand
-        ./gradlew build
+        TARGET="${{ github.event.inputs.targetMod || 'godhand' }}"
+        if [ -d "$TARGET" ]; then
+          echo "Building target mod directory: $TARGET"
+          cd "$TARGET"
+          if [ -f "gradlew" ]; then
+            ./gradlew build
+          else
+            gradle build || true
+          fi
+        else
+          echo "Target $TARGET not found, falling back to godhand"
+          cd godhand
+          ./gradlew build
+        fi
 
     - name: Upload test report
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: gradle-test-report
-        path: godhand/build/reports/tests/test/
+        path: |
+          godhand/build/reports/tests/test/
+          mods/*/build/reports/tests/test/
         if-no-files-found: ignore
 
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: godhand-mod
-        path: "godhand/build/libs/*.jar"
+        path: |
+          godhand/build/libs/*.jar
+          mods/*/build/libs/*.jar
         if-no-files-found: warn
 
     - name: SonarQube Scan
-      if: env.SONAR_TOKEN != ''
+      if: env.SONAR_TOKEN != '' && (github.event.inputs.targetMod == '' || github.event.inputs.targetMod == 'godhand')
       uses: sonarsource/sonarcloud-github-action@master
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

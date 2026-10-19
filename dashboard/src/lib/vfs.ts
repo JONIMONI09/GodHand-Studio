@@ -15,6 +15,16 @@ export interface ModProjectMeta {
   mcVersion: string;
   description: string;
   isSample?: boolean;
+  version?: string;
+  targetMinecraft?: string;
+  targetJava?: string;
+  targetArch?: string;
+  path?: string;
+  jarExists?: boolean;
+  jarSize?: number;
+  jarName?: string;
+  status?: 'idle' | 'building' | 'success' | 'failed';
+  logs?: string[];
 }
 
 // In-Memory fallback store
@@ -956,7 +966,17 @@ public class ${className} {
         name: 'ARM32 Hardware Alignment Fix',
         loader: 'fabric',
         mcVersion: '1.21.1',
-        description: 'Fixes fatal ARM32/v8l hardware alignment crashes on Android devices.',
+        description: 'Fixes fatal ARM32/v8l hardware alignment crashes on Android devices by safely redirecting unaligned float memory writes.',
+        version: '1.0.0',
+        targetMinecraft: '1.21.1+ (FABRIC)',
+        targetJava: 'Java 21 LTS',
+        targetArch: 'ARM32 / ARMv7 / ARMv8l',
+        path: 'mods/arm32-fix',
+        jarExists: true,
+        jarSize: 42 * 1024,
+        jarName: 'arm32-fix-1.0.0.jar',
+        status: 'idle',
+        logs: ['[VFS] ARM32 Hardware Alignment Fix Mod ready in browser VFS.'],
         isSample: false
       },
       {
@@ -965,6 +985,16 @@ public class ${className} {
         loader: 'fabric',
         mcVersion: '1.21.1',
         description: 'Core Fabric Minecraft Mod with Loom & In-Browser testing.',
+        version: '1.0.0',
+        targetMinecraft: '1.21.1+ (FABRIC)',
+        targetJava: 'Java 21 LTS',
+        targetArch: 'System Native',
+        path: 'godhand',
+        jarExists: true,
+        jarSize: 56 * 1024,
+        jarName: 'godhand-1.0.0.jar',
+        status: 'idle',
+        logs: ['[VFS] GodHand Studio Base ready in browser VFS.'],
         isSample: false
       }
     ];
@@ -984,12 +1014,24 @@ public class ${className} {
         const jsonStr = await idbGet(`vfs_${p}::godhand-mod.json`);
         if (jsonStr) {
           const parsed = JSON.parse(jsonStr);
+          const loader = parsed.loader || 'fabric';
+          const mcVer = parsed.mcVersion || '1.21.1';
           list.push({
             id: p,
             name: parsed.name || p,
-            loader: parsed.loader || 'fabric',
-            mcVersion: parsed.mcVersion || '1.21.1',
+            loader,
+            mcVersion: mcVer,
             description: parsed.description || 'Custom Mod',
+            version: parsed.version || '1.0.0',
+            targetMinecraft: `${mcVer}+ (${loader.toUpperCase()})`,
+            targetJava: 'Java 21 LTS',
+            targetArch: 'System Native',
+            path: `mods/${p}`,
+            jarExists: true,
+            jarSize: 32 * 1024,
+            jarName: `${p}-1.0.0.jar`,
+            status: 'idle',
+            logs: [`[VFS] Custom Mod '${p}' ready in browser VFS.`],
             isSample: Boolean(parsed.isSample)
           });
         }

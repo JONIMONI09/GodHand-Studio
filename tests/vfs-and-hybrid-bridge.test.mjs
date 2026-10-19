@@ -113,4 +113,41 @@ describe('In-Browser Virtual File System (VFS) & Hybrid Cloud Bridge Suite', () 
     assert.ok(dockerContent.includes('eclipse-temurin:21'), 'Dockerfile must use OpenJDK 21');
     assert.ok(dockerContent.includes('nodejs'), 'Dockerfile must install Node.js');
   });
+
+  it('verifies server.js Private Network Access middleware runs before CORS preflight termination', () => {
+    const serverContent = fs.readFileSync(serverPath, 'utf8');
+    const pnaIndex = serverContent.indexOf('Access-Control-Allow-Private-Network');
+    const corsUseIndex = serverContent.indexOf('app.use(cors(');
+    assert.ok(pnaIndex !== -1, 'Must handle Access-Control-Allow-Private-Network');
+    assert.ok(corsUseIndex !== -1, 'Must use cors middleware');
+    assert.ok(pnaIndex < corsUseIndex, 'PNA middleware must be registered before app.use(cors) to ensure preflight OPTIONS receives header');
+  });
+
+  it('verifies server.js supports project-aware file moving and folders endpoints', () => {
+    const serverContent = fs.readFileSync(serverPath, 'utf8');
+    assert.ok(serverContent.includes('/api/system-mods/:id/folders'), 'Must define system-mods folders route');
+    assert.ok(serverContent.includes('/api/system-mods/:id/move'), 'Must define system-mods move route');
+    assert.ok(serverContent.includes("projectId || project"), 'Must support optional projectId in fs endpoints');
+  });
+
+  it('verifies vfs.ts listProjects exports full SystemMod metadata', () => {
+    const vfsContent = fs.readFileSync(vfsPath, 'utf8');
+    assert.ok(vfsContent.includes('targetMinecraft'), 'Must provide targetMinecraft');
+    assert.ok(vfsContent.includes('targetJava'), 'Must provide targetJava');
+    assert.ok(vfsContent.includes('targetArch'), 'Must provide targetArch');
+    assert.ok(vfsContent.includes('jarExists'), 'Must provide jarExists flag');
+  });
+
+  it('verifies launcher scripts check for node_modules before building frontend', () => {
+    const batPath = path.resolve(rootDir, 'start-godhand.bat');
+    const ps1Path = path.resolve(rootDir, 'launch-godhand.ps1');
+    assert.ok(fs.existsSync(batPath), 'start-godhand.bat must exist');
+    assert.ok(fs.existsSync(ps1Path), 'launch-godhand.ps1 must exist');
+
+    const batContent = fs.readFileSync(batPath, 'utf8');
+    assert.ok(batContent.includes('dashboard\\node_modules'), 'Batch launcher must verify dashboard node_modules');
+
+    const ps1Content = fs.readFileSync(ps1Path, 'utf8');
+    assert.ok(ps1Content.includes('dashboard\\node_modules') || ps1Content.includes('dashboard/node_modules'), 'PowerShell launcher must verify dashboard node_modules');
+  });
 });

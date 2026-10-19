@@ -140,7 +140,7 @@ export function BackendOfflineModal() {
   return (
     <>
       {/* Non-Blocking Floating Hybrid Mode Status Pill (Bottom Left) */}
-      <div className="fixed bottom-3 left-3 z-40 select-none pointer-events-auto">
+      <div className="fixed bottom-9 left-3 z-40 select-none pointer-events-auto">
         <button
           onClick={() => setIsOpen(true)}
           className="group flex items-center gap-2 px-3 py-1.5 bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-emerald-500/40 rounded-full shadow-lg backdrop-blur-md transition-all hover:border-emerald-400 hover:shadow-emerald-500/10 text-xs font-medium"

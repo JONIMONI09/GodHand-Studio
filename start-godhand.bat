@@ -16,6 +16,11 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+if not exist "dashboard\node_modules" (
+    echo [*] dashboard\node_modules not found. Installing frontend dependencies...
+    call npm --prefix dashboard install
+)
+
 if not exist "dashboard\dist\index.html" (
     echo [*] dashboard\dist not found. Compiling frontend bundle...
     call npm run build --prefix dashboard

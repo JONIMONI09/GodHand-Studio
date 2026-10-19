@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { exec, spawn, execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -38,6 +37,14 @@ const allowedOrigins = [
   'http://127.0.0.1:3000'
 ];
 
+// Browser Private Network Access headers (must run before cors so preflight OPTIONS include the header)
+app.use((req, res, next) => {
+  if (req.headers['access-control-request-private-network'] || req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+  next();
+});
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -57,14 +64,6 @@ app.use(cors({
   },
   credentials: true
 }));
-
-// Browser Private Network Access headers
-app.use((req, res, next) => {
-  if (req.headers['access-control-request-private-network']) {
-    res.setHeader('Access-Control-Allow-Private-Network', 'true');
-  }
-  next();
-});
 
 app.use(express.json());
 
@@ -713,9 +712,8 @@ function buildTree(dirPath, basePath, currentDepth = 0) {
   return result;
 }
 
-function resolveAndCheckPath(filePath) {
+function resolveAndCheckPath(filePath, projectBase = path.resolve(ROOT_DIR, 'godhand')) {
   if (!filePath || typeof filePath !== 'string') return null;
-  const projectBase = path.resolve(ROOT_DIR, 'godhand');
   // Strip leading slashes to prevent path.resolve treating it as filesystem root
   const cleaned = filePath.replace(/^[/\\]+/, '');
   const fullPath = path.resolve(projectBase, cleaned);
@@ -724,16 +722,22 @@ function resolveAndCheckPath(filePath) {
 }
 
 app.get('/api/fs/tree', (req, res) => {
-  const projectBase = path.join(ROOT_DIR, 'godhand');
+  const project = req.query.projectId || req.query.project;
+  const projectBase = project ? getSystemModDir(project) : path.join(ROOT_DIR, 'godhand');
+  if (!fs.existsSync(projectBase)) {
+    return res.status(404).json({ error: 'Project directory not found' });
+  }
   const tree = buildTree(projectBase, projectBase);
   res.json({ tree });
 });
 
 app.get('/api/fs/file', (req, res) => {
   const { path: filePath } = req.query;
+  const project = req.query.projectId || req.query.project;
   if (!filePath) return res.status(400).json({ error: 'Path is required' });
   
-  const fullPath = resolveAndCheckPath(filePath);
+  const projectBase = project ? getSystemModDir(project) : path.resolve(ROOT_DIR, 'godhand');
+  const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
@@ -745,10 +749,11 @@ app.get('/api/fs/file', (req, res) => {
 });
 
 app.post('/api/fs/file', (req, res) => {
-  const { path: filePath, content } = req.body;
+  const { path: filePath, content, projectId, project } = req.body;
   if (!filePath || content === undefined) return res.status(400).json({ error: 'Path and content are required' });
   
-  const fullPath = resolveAndCheckPath(filePath);
+  const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
+  const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   // Quota check: prevent files larger than 5MB
@@ -770,13 +775,14 @@ app.post('/api/fs/file', (req, res) => {
 });
 
 app.post('/api/fs/move', (req, res) => {
-  const { sourcePath, destinationPath } = req.body;
+  const { sourcePath, destinationPath, projectId, project } = req.body;
   if (!sourcePath || !destinationPath) {
     return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
   }
 
-  const srcFullPath = resolveAndCheckPath(sourcePath);
-  let destFullPath = resolveAndCheckPath(destinationPath);
+  const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
+  const srcFullPath = resolveAndCheckPath(sourcePath, projectBase);
+  let destFullPath = resolveAndCheckPath(destinationPath, projectBase);
 
   if (!srcFullPath || !destFullPath) {
     return res.status(403).json({ error: 'Invalid or restricted path access' });
@@ -809,7 +815,6 @@ app.post('/api/fs/move', (req, res) => {
     }
 
     fs.renameSync(srcFullPath, destFullPath);
-    const projectBase = path.resolve(ROOT_DIR, 'godhand');
     const relativeNewPath = path.relative(projectBase, destFullPath).replace(/\\/g, '/');
     res.json({ success: true, oldPath: sourcePath, newPath: relativeNewPath });
   } catch (err) {
@@ -1085,7 +1090,11 @@ app.get('/api/git/diff', async (req, res) => {
 
 app.get('/api/fs/folders', (req, res) => {
   try {
-    const projectBase = path.resolve(ROOT_DIR, 'godhand');
+    const project = req.query.projectId || req.query.project;
+    const projectBase = project ? getSystemModDir(project) : path.resolve(ROOT_DIR, 'godhand');
+    if (!fs.existsSync(projectBase)) {
+      return res.status(404).json({ error: 'Project directory not found' });
+    }
     const folders = ['']; // root directory is represented by ''
 
     function scanDirs(dir) {
@@ -1451,6 +1460,78 @@ app.delete('/api/system-mods/:id/file', (req, res) => {
       fs.unlinkSync(resolved);
     }
     res.json({ success: true, path: relativePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/system-mods/:id/folders', (req, res) => {
+  const modDir = getSystemModDir(req.params.id);
+  if (!fs.existsSync(modDir)) {
+    return res.status(404).json({ error: 'Mod directory not found' });
+  }
+  try {
+    const folders = [''];
+    function scanDirs(dir) {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (entry.name === '.git' || entry.name === 'build' || entry.name === '.gradle' || entry.name === 'node_modules') continue;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(modDir, fullPath).replace(/\\/g, '/');
+          folders.push(relPath);
+          scanDirs(fullPath);
+        }
+      }
+    }
+    scanDirs(modDir);
+    res.json({ folders });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system-mods/:id/move', (req, res) => {
+  const modDir = getSystemModDir(req.params.id);
+  if (!fs.existsSync(modDir)) {
+    return res.status(404).json({ error: 'Mod directory not found' });
+  }
+  const { sourcePath, destinationPath } = req.body;
+  if (!sourcePath || !destinationPath) {
+    return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
+  }
+
+  const cleanSrc = sourcePath.replace(/^[/\\]+/, '');
+  const cleanDst = destinationPath.replace(/^[/\\]+/, '');
+  const srcFullPath = path.resolve(modDir, cleanSrc);
+  let destFullPath = path.resolve(modDir, cleanDst);
+
+  if (!srcFullPath.startsWith(modDir) || !destFullPath.startsWith(modDir)) {
+    return res.status(403).json({ error: 'Invalid or restricted path access' });
+  }
+  if (!fs.existsSync(srcFullPath)) {
+    return res.status(404).json({ error: 'Source file or folder not found' });
+  }
+  if (fs.existsSync(destFullPath) && fs.statSync(destFullPath).isDirectory()) {
+    if (path.basename(destFullPath) !== path.basename(srcFullPath)) {
+      destFullPath = path.join(destFullPath, path.basename(srcFullPath));
+    }
+  }
+  if (srcFullPath === destFullPath) {
+    return res.json({ success: true, message: 'Source and destination are the same' });
+  }
+  if (destFullPath.startsWith(srcFullPath + path.sep)) {
+    return res.status(400).json({ error: 'Cannot move a folder into its own subdirectory' });
+  }
+
+  try {
+    const destDir = path.dirname(destFullPath);
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    fs.renameSync(srcFullPath, destFullPath);
+    const relNewPath = path.relative(modDir, destFullPath).replace(/\\/g, '/');
+    res.json({ success: true, oldPath: sourcePath, newPath: relNewPath });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

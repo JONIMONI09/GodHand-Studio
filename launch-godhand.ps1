@@ -16,6 +16,12 @@ if (-not $nodeCmd) {
 
 Set-Location -Path $PSScriptRoot
 
+$nodeModules = Join-Path $PSScriptRoot "dashboard\node_modules"
+if (-not (Test-Path $nodeModules)) {
+    Write-Host "[*] dashboard/node_modules not found. Installing frontend dependencies..." -ForegroundColor Yellow
+    npm --prefix dashboard install
+}
+
 $distIndex = Join-Path $PSScriptRoot "dashboard\dist\index.html"
 if (-not (Test-Path $distIndex)) {
     Write-Host "[*] dashboard/dist not found. Compiling frontend bundle..." -ForegroundColor Yellow
