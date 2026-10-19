@@ -9,6 +9,7 @@ import net.minecraft.nbt.NbtCompound;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 import java.util.HashMap;
 import java.util.Map;
 import java.lang.reflect.Field;
@@ -18,25 +19,52 @@ import static org.mockito.Mockito.*;
 
 public class CompanionBuffGoalTest {
 
+    private static boolean bootstrapSuccessful = false;
+
     @BeforeAll
     public static void setupMinecraft() {
         try {
             net.minecraft.SharedConstants.createGameVersion();
             net.minecraft.Bootstrap.initialize();
-        } catch (Exception | Error e) {}
+            if (StatusEffects.REGENERATION != null && StatusEffects.REGENERATION.hasKeyAndValue()) {
+                bootstrapSuccessful = true;
+            }
+        } catch (Throwable t) {
+            bootstrapSuccessful = false;
+        }
     }
 
     private LivingEntity mockCompanion;
     private NbtCompound mockNbt;
     private CompanionBuffGoal goal;
+    private Map<net.minecraft.registry.entry.RegistryEntry<StatusEffect>, StatusEffectInstance> activeEffectsMap;
 
     @BeforeEach
     public void setup() {
-        mockCompanion = mock(LivingEntity.class, withSettings().extraInterfaces(IEntityDataSaver.class));
+        Assumptions.assumeTrue(bootstrapSuccessful, "Skipping CompanionBuffGoalTest because Minecraft Bootstrap is not initialized in this headless test runner");
+
+        mockCompanion = mock(LivingEntity.class, withSettings().extraInterfaces(IEntityDataSaver.class).defaultAnswer(CALLS_REAL_METHODS));
         mockNbt = new NbtCompound();
         goal = new CompanionBuffGoal(mockCompanion);
 
         doReturn(mockNbt).when((IEntityDataSaver) mockCompanion).getPersistentData();
+
+        activeEffectsMap = new HashMap<>();
+        try {
+            Field f = LivingEntity.class.getDeclaredField("activeStatusEffects");
+            f.setAccessible(true);
+            f.set(mockCompanion, activeEffectsMap);
+        } catch (Exception e) {
+            try {
+                for (Field f : LivingEntity.class.getDeclaredFields()) {
+                    if (Map.class.isAssignableFrom(f.getType())) {
+                        f.setAccessible(true);
+                        f.set(mockCompanion, activeEffectsMap);
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     @Test
@@ -44,52 +72,40 @@ public class CompanionBuffGoalTest {
         mockNbt.putBoolean("godhand_is_companion", true);
         mockNbt.putBoolean("godhand_effect_regen", true);
 
-        org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
-
-        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(null);
-
         goal.tick();
 
-        verify(mockCompanion).addStatusEffect(argThat(inst -> 
-            inst != null && 
-            StatusEffects.REGENERATION.equals(inst.getEffectType()) && 
-            inst.getDuration() == 210
-        ));
+        StatusEffectInstance appliedEffect = activeEffectsMap.get(StatusEffects.REGENERATION);
+        assertNotNull(appliedEffect, "Effect should have been added to activeEffectsMap");
+        assertEquals(StatusEffects.REGENERATION, appliedEffect.getEffectType());
+        assertEquals(210, appliedEffect.getDuration());
     }
 
     @Test
     public void testTick_DoesNotAddEffectWhenAlreadyPresentAndDurationHigh() {
         StatusEffectInstance currentEffect = new StatusEffectInstance(StatusEffects.REGENERATION, 100, 0);
+        activeEffectsMap.put(StatusEffects.REGENERATION, currentEffect);
 
         mockNbt.putBoolean("godhand_is_companion", true);
         mockNbt.putBoolean("godhand_effect_regen", true);
 
-        org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
-
-        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(currentEffect);
-
         goal.tick();
 
-        verify(mockCompanion, never()).addStatusEffect(any());
+        assertEquals(100, activeEffectsMap.get(StatusEffects.REGENERATION).getDuration());
     }
 
     @Test
     public void testTick_AddsEffectWhenAlreadyPresentButDurationLow() {
         StatusEffectInstance currentEffect = new StatusEffectInstance(StatusEffects.REGENERATION, 15, 0);
+        activeEffectsMap.put(StatusEffects.REGENERATION, currentEffect);
 
         mockNbt.putBoolean("godhand_is_companion", true);
         mockNbt.putBoolean("godhand_effect_regen", true);
 
-        org.junit.jupiter.api.Assumptions.assumeTrue(StatusEffects.REGENERATION != null, "Minecraft registry not initialized");
-
-        when(mockCompanion.getStatusEffect(StatusEffects.REGENERATION)).thenReturn(currentEffect);
-
         goal.tick();
 
-        verify(mockCompanion).addStatusEffect(argThat(inst -> 
-            inst != null && 
-            StatusEffects.REGENERATION.equals(inst.getEffectType()) && 
-            inst.getDuration() == 210
-        ));
+        StatusEffectInstance appliedEffect = activeEffectsMap.get(StatusEffects.REGENERATION);
+        assertNotNull(appliedEffect, "Effect should have been added to activeEffectsMap");
+        assertEquals(StatusEffects.REGENERATION, appliedEffect.getEffectType());
+        assertEquals(210, appliedEffect.getDuration());
     }
 }
