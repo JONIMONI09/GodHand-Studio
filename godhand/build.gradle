@@ -32,7 +32,14 @@ processResources {
 }
 tasks.named('test') {
     useJUnitPlatform()
-    jvmArgs("-XX:+EnableDynamicAgentLoading")
+    jvmArgs("-XX:+EnableDynamicAgentLoading", "-Djava.awt.headless=true")
+    testLogging {
+        events "passed", "skipped", "failed", "standardError"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+    }
 }
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 21

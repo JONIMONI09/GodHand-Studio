@@ -45,6 +45,14 @@ jobs:
         cd godhand
         ./gradlew build
 
+    - name: Upload test report
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gradle-test-report
+        path: godhand/build/reports/tests/test/
+        if-no-files-found: ignore
+
     - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
