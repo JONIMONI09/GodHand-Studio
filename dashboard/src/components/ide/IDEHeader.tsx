@@ -294,11 +294,11 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
         {/* Create New Mod Button */}
         <button
           onClick={() => setShowNewModModal(true)}
-          className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 hover:text-white rounded text-xs font-medium transition"
+          className="flex items-center gap-1 px-2 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 hover:text-white rounded text-xs font-medium transition shrink-0"
           title={t('createNewMod')}
         >
-          <Plus className="h-3.5 w-3.5 text-indigo-400" />
-          <span className="hidden md:inline">{t('createNewMod')}</span>
+          <Plus className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+          <span className="hidden xl:inline">{t('createNewMod')}</span>
         </button>
 
         {/* Quick Console Toggle Button in Header */}

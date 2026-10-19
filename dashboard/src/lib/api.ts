@@ -51,12 +51,23 @@ export function setCustomBackendUrl(url: string | null): void {
   isLocalBackendAvailable = null;
 }
 
+export function clearCustomBackendUrl(): void {
+  setCustomBackendUrl(null);
+  isLocalBackendAvailable = null;
+  isVFSStandalone = false;
+}
+
 export function isVFSMode(): boolean {
   return isVFSStandalone || isLocalBackendAvailable === false;
 }
 
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') return '';
+
+  // If backend is verified offline, don't blast the dead tunnel
+  if (isLocalBackendAvailable === false) {
+    return '';
+  }
 
   const customBackend = getCustomBackendUrl();
   if (customBackend) {
@@ -350,8 +361,15 @@ async function handleVfsFallback(normalizedPath: string, options: RequestInit = 
  * Resilient API fetch wrapper that guarantees safe JSON handling and VFS fallback
  */
 export async function apiFetch<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const base = getApiBaseUrl();
   const normalizedPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // If backend is known to be offline, route directly to VFS without triggering cross-origin network errors
+  if (isVFSMode()) {
+    const vfsRes = await handleVfsFallback(normalizedPath, options);
+    return (await vfsRes.json()) as T;
+  }
+
+  const base = getApiBaseUrl();
   const url = base ? `${base}${normalizedPath}` : normalizedPath;
 
   try {
@@ -368,6 +386,8 @@ export async function apiFetch<T = any>(endpoint: string, options: RequestInit =
 
     if (!isJson) {
       // Returned HTML (e.g. Firebase Hosting SPA rewrite or 404), fall back to In-Browser VFS
+      isLocalBackendAvailable = false;
+      isVFSStandalone = true;
       const vfsRes = await handleVfsFallback(normalizedPath, options);
       return (await vfsRes.json()) as T;
     }
@@ -379,7 +399,9 @@ export async function apiFetch<T = any>(endpoint: string, options: RequestInit =
 
     return data as T;
   } catch (err: any) {
-    // If network connection failed or server is offline, fallback to In-Browser VFS
+    // If network connection failed or server is offline, mark offline and fallback to In-Browser VFS
+    isLocalBackendAvailable = false;
+    isVFSStandalone = true;
     if (normalizedPath.startsWith('/api/')) {
       const vfsRes = await handleVfsFallback(normalizedPath, options);
       return (await vfsRes.json()) as T;
@@ -401,6 +423,12 @@ if (typeof window !== 'undefined' && !(window as any).__vfsFetchInstalled) {
     // Only intercept local /api/ routes
     if (urlString.startsWith('/api/') || urlString.includes('/api/')) {
       const apiPath = urlString.includes('/api/') ? '/api/' + urlString.split('/api/')[1] : urlString;
+
+      // If backend is known to be offline, short-circuit silently to VFS
+      if (isVFSMode()) {
+        return await handleVfsFallback(apiPath, init);
+      }
+
       const base = getApiBaseUrl();
       const targetUrl = base ? `${base}${apiPath}` : apiPath;
 
@@ -413,11 +441,15 @@ if (typeof window !== 'undefined' && !(window as any).__vfsFetchInstalled) {
         }
         // If server responded with HTML (Firebase 404 SPA fallback), route to VFS
         if (ct.includes('text/html')) {
+          isLocalBackendAvailable = false;
+          isVFSStandalone = true;
           return await handleVfsFallback(apiPath, init);
         }
         return response;
       } catch (_) {
-        // Network error / localhost offline -> seamlessly handle via VFS
+        // Network error / localhost offline -> mark offline and seamlessly handle via VFS
+        isLocalBackendAvailable = false;
+        isVFSStandalone = true;
         return await handleVfsFallback(apiPath, init);
       }
     }
