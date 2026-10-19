@@ -1,6 +1,18 @@
 import { test, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { translations } from '../dashboard/src/i18n/translations.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const translationsPath = path.resolve('dashboard/src/i18n/translations.ts');
+const translationsRaw = fs.readFileSync(translationsPath, 'utf-8');
+
+function extractKeyValue(content, lang, key) {
+  const langBlock = lang === 'en'
+    ? content.match(/en:\s*\{([\s\S]*?)\n\s*\},/)?.[1] || ''
+    : content.match(/de:\s*\{([\s\S]*?)\n\s*\}\s*;/)?.[1] || '';
+  const match = langBlock.match(new RegExp(`${key}:\\s*"([^"]+)"`));
+  return match ? match[1] : '';
+}
 
 // Logic under test: Ticket Safety Rules
 function canClaimTicket(userUid, ticketReporterId) {
@@ -68,19 +80,15 @@ function getMessageTheme(senderId, reporterId, senderRole) {
 }
 
 function getTicketStatusBadgeLabel(status, lang = 'de') {
-  const dict = translations[lang] || translations.en;
-  switch (status) {
-    case 'open':
-      return dict.statusOpen;
-    case 'in_progress':
-      return dict.statusInProgress;
-    case 'resolved':
-      return dict.statusResolved;
-    case 'closed':
-      return dict.statusClosed;
-    default:
-      return status;
-  }
+  const keyMap = {
+    open: 'statusOpen',
+    in_progress: 'statusInProgress',
+    resolved: 'statusResolved',
+    closed: 'statusClosed'
+  };
+  const key = keyMap[status];
+  if (!key) return status;
+  return extractKeyValue(translationsRaw, lang, key) || status;
 }
 
 describe('Support Ticket Safety & Role Color Distinction', () => {
@@ -213,10 +221,12 @@ describe('Support Ticket Safety & Role Color Distinction', () => {
     ];
 
     for (const key of requiredKeys) {
-      assert.ok(translations.en[key], `Missing EN key: ${key}`);
-      assert.ok(translations.de[key], `Missing DE key: ${key}`);
-      assert.notStrictEqual(translations.en[key].trim(), '');
-      assert.notStrictEqual(translations.de[key].trim(), '');
+      const enVal = extractKeyValue(translationsRaw, 'en', key);
+      const deVal = extractKeyValue(translationsRaw, 'de', key);
+      assert.ok(enVal, `Missing EN key: ${key}`);
+      assert.ok(deVal, `Missing DE key: ${key}`);
+      assert.notStrictEqual(enVal.trim(), '');
+      assert.notStrictEqual(deVal.trim(), '');
     }
   });
 
