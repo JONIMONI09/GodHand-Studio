@@ -89,8 +89,8 @@ See [CODEGRAPH.md](./CODEGRAPH.md) and [CODEGRAPH_INDEX.md](./CODEGRAPH_INDEX.md
 
 1. Clone repository:
    ```bash
-   git clone https://github.com/EZdev0/GodHand.git
-   cd GodHand
+   git clone https://github.com/JONIMONI09/GodHand-Studio.git
+   cd GodHand-Studio
    ```
 
 2. Install root and dashboard dependencies:
@@ -100,6 +100,9 @@ See [CODEGRAPH.md](./CODEGRAPH.md) and [CODEGRAPH_INDEX.md](./CODEGRAPH_INDEX.md
 
 3. Launch development server:
    ```bash
+   # Windows 1-click launcher
+   ./start-godhand.bat
+   # Or via npm
    npm run dev
    ```
    Open `http://localhost:3000` in your browser.
@@ -108,7 +111,7 @@ See [CODEGRAPH.md](./CODEGRAPH.md) and [CODEGRAPH_INDEX.md](./CODEGRAPH_INDEX.md
 
 ## Testing & Quality Assurance
 
-The codebase includes 25+ automated unit tests across 5 specialized test suites:
+The codebase includes **87 automated unit and integration tests** across 12 specialized test suites:
 
 ```bash
 # Run all automated test suites
@@ -121,13 +124,20 @@ npm run lint
 npm run build
 ```
 
-| Test Suite | Purpose | Tests |
-|---|---|---|
-| `tests/tree-sorting.test.mjs` | File Explorer arrangement, custom order, up/down shifts | 8 |
-| `tests/git-safety.test.mjs` | Checkpoints, branch validation, shell escape prevention, rollback | 7 |
-| `tests/fs-api-safety.test.mjs` | Path traversal protection, 5MB quota, cyclic move blocks | 4 |
-| `tests/role-permissions.test.mjs` | RBAC hierarchy, tab access, case claims | 3 |
-| `tests/translations.test.mjs` | 100% dictionary parity, empty key rejection | 3 |
+| Test Suite | Purpose |
+|---|---|
+| `tests/auth-safety.test.mjs` | OAuth domain validation, safe auth callbacks |
+| `tests/autoscan.test.mjs` | Client-side Java typo detection & auto-fix |
+| `tests/client-bridge.test.mjs` | Content-Type JSON parsing safety & host fallbacks |
+| `tests/fs-api-safety.test.mjs` | Path traversal protection, 5MB quota, cyclic move blocks |
+| `tests/gameplay.test.mjs` | RunClient canvas simulation & HUD status checks |
+| `tests/git-safety.test.mjs` | Checkpoints, branch validation, shell escape prevention, rollback |
+| `tests/multi-loader-and-compiler.test.mjs` | Multi-loader scaffolding & Gradle task execution |
+| `tests/role-permissions.test.mjs` | RBAC hierarchy, tab access, case claims |
+| `tests/runtime.test.mjs` | Server runtime health, endpoint safety |
+| `tests/ticket-safety.test.mjs` | Ticket audit logs, input sanitization |
+| `tests/translations.test.mjs` | 100% dictionary parity (513 keys EN/DE), empty key rejection |
+| `tests/tree-sorting.test.mjs` | File Explorer arrangement, custom order, up/down shifts |
 
 ---
 
