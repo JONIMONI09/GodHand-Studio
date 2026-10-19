@@ -35,3 +35,18 @@
   - Distinguish between `localhost` and `127.0.0.1` (which are treated as separate origins by OAuth), and offer a 1-click fallback to `http://localhost:3000`.
   - Reassure developers that Email/Password sign-in and registration function immediately without domain whitelisting.
 
+### 7. GitHub CLI (`gh`), Remote Setup & Email Privacy (GH007)
+- **Problem**: Pushing commits via git CLI to GitHub failed with `remote: error: GH007: Your push would publish a private email address.` when the user had GitHub's privacy protection enabled.
+- **Correction**:
+  - When configuring git user email in environments where GitHub email privacy is active, resolve the GitHub user ID via `gh api user` and use the GitHub-provided noreply address: `<id>+<username>@users.noreply.github.com`.
+  - For public repo creation via `gh repo create <owner>/<name> --public --source=. --remote=origin --push`, ensure commits are cleanly rewritten/authored before push.
+  - Always maintain a strict Git discipline: main branch protected, feature branch opened, and professional PR created via `gh pr create` with Title, Summary, Key Changes, and Verification.
+
+### 8. Static Hosting vs Fullstack Hybrid Bridge (JSON Parsing Safety)
+- **Problem**: Deploying an IDE web frontend to static hosting (e.g. Firebase Hosting) causes `/api/*` endpoints to return `index.html` (HTTP 200 text/html) because rewrite rules route unmatched paths to SPA fallback, resulting in `SyntaxError: JSON.parse: unexpected character at line 1 column 1`.
+- **Correction**:
+  - Wrap `fetch` responses with strict `Content-Type` checks: verify `res.headers.get('content-type')?.includes('application/json')` before calling `res.json()`.
+  - If an HTML fallback is returned on an API route, gracefully catch it and expose actionable error messaging.
+  - Provide `<LocalhostBanner />` and 1-click native launcher scripts (`start-godhand.bat`, `launch-godhand.ps1`) to run the Node.js compiler backend on `http://localhost:3000` alongside the cloud frontend.
+
+
