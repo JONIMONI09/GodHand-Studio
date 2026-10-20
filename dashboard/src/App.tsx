@@ -16,7 +16,8 @@ import Login from './pages/Login';
 import Admin from './pages/Admin';
 import UserProfile from './pages/UserProfile';
 import { db, auth } from './lib/firebase';
-import { collection, addDoc, doc, getDoc, getDocs, deleteDoc, updateDoc, query, where, serverTimestamp } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
+import { collection, addDoc, doc, getDoc, getDocs, deleteDoc, updateDoc, setDoc, onSnapshot, query, where, serverTimestamp } from 'firebase/firestore';
 import { GitStudio } from './components/GitStudio';
 import { SupportTicketModal } from './components/SupportTicketModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
@@ -334,29 +335,27 @@ function IDE() {
 
   React.useEffect(() => {
     if (projectId && user) {
-      import('firebase/firestore').then(({ doc, getDoc, setDoc, serverTimestamp }) => {
-        const docRef = doc(db, 'projects', projectId);
-        getDoc(docRef).then(snap => {
-          if (snap.exists()) {
-            setProjectStatus(snap.data().status);
-          } else {
-            setDoc(docRef, {
-              ownerId: user.uid,
-              name: projectId,
-              status: 'active',
-              reportsCount: 0,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }).catch(e => {
-              console.error("Error creating project doc:", e);
-              toast.error("Error creating project doc: " + e.message);
-            });
-            setProjectStatus('active');
-          }
-        }).catch(err => {
-          console.error("Error loading the project", err); toast.error("Error loading the project: " + err.message);
-          setProjectStatus('active'); // fallback
-        });
+      const docRef = doc(db, 'projects', projectId);
+      getDoc(docRef).then(snap => {
+        if (snap.exists()) {
+          setProjectStatus(snap.data().status);
+        } else {
+          setDoc(docRef, {
+            ownerId: user.uid,
+            name: projectId,
+            status: 'active',
+            reportsCount: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).catch(e => {
+            console.error("Error creating project doc:", e);
+            toast.error("Error creating project doc: " + e.message);
+          });
+          setProjectStatus('active');
+        }
+      }).catch(err => {
+        console.error("Error loading the project", err); toast.error("Error loading the project: " + err.message);
+        setProjectStatus('active'); // fallback
       });
     }
   }, [projectId, user]);
@@ -1959,7 +1958,6 @@ function Dashboard() {
   const [showDashboardSupport, setShowDashboardSupport] = React.useState(false);
 
   React.useEffect(() => {
-    import('firebase/firestore').then(({ collection, query, where, getDocs }) => {
       // Fetch published projects
       const qPublic = query(collection(db, 'published_projects'), where('isPublic', '==', true));
       getDocs(qPublic).then(snapshot => {
@@ -2026,7 +2024,6 @@ function Dashboard() {
       } else {
         setMyProjects([]);
       }
-    });
   }, [user]);
 
 
@@ -2256,10 +2253,8 @@ function Dashboard() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          import('firebase/firestore').then(({ doc, deleteDoc }) => {
-                            deleteDoc(doc(db, 'projects', project.id)).then(() => {
-                              setMyProjects(prev => prev.filter(p => p.id !== project.id));
-                            });
+                          deleteDoc(doc(db, 'projects', project.id)).then(() => {
+                            setMyProjects(prev => prev.filter(p => p.id !== project.id));
                           });
                         }}
                         className="text-rose-500 hover:text-rose-400 text-xs transition-colors z-10 relative bg-rose-500/10 px-2 py-1 rounded font-medium"
@@ -2350,10 +2345,8 @@ function Dashboard() {
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
-                              import('firebase/firestore').then(({ doc, updateDoc }) => {
-                                updateDoc(doc(db, 'published_projects', project.id), { isPublic: !project.isPublic }).then(() => {
-                                  setPublishedProjects(prev => prev.map(p => p.id === project.id ? { ...p, isPublic: !p.isPublic } : p));
-                                });
+                              updateDoc(doc(db, 'published_projects', project.id), { isPublic: !project.isPublic }).then(() => {
+                                setPublishedProjects(prev => prev.map(p => p.id === project.id ? { ...p, isPublic: !p.isPublic } : p));
                               });
                             }} 
                             className={`${project.isPublic ? 'text-amber-400 hover:text-amber-300 bg-amber-500/10' : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/10'} transition-colors flex items-center gap-1 font-medium px-2 py-1 rounded`}
@@ -2416,19 +2409,17 @@ function Dashboard() {
               <button
                 onClick={() => {
                   if (deleteConfirmation.trim().toLowerCase() === `confirm ${projectToDelete.name}`.trim().toLowerCase()) {
-                    import('firebase/firestore').then(({ doc, updateDoc, serverTimestamp }) => {
-                      updateDoc(doc(db, 'projects', projectToDelete.id), {
-                        status: 'deleted',
-                        deletedBy: 'user',
-                        deletedAt: serverTimestamp(),
-                        updatedAt: serverTimestamp()
-                      }).then(() => {
-                        setMyProjects(prev => prev.map(p => p.id === projectToDelete.id ? { ...p, status: 'deleted', deletedBy: 'user' } : p));
-                        setProjectToDelete(null);
-                      }).catch(e => { 
-                        console.error("User Delete Error:", e); 
-                        toast.error("Error: " + e.message);
-                      });
+                    updateDoc(doc(db, 'projects', projectToDelete.id), {
+                      status: 'deleted',
+                      deletedBy: 'user',
+                      deletedAt: serverTimestamp(),
+                      updatedAt: serverTimestamp()
+                    }).then(() => {
+                      setMyProjects(prev => prev.map(p => p.id === projectToDelete.id ? { ...p, status: 'deleted', deletedBy: 'user' } : p));
+                      setProjectToDelete(null);
+                    }).catch(e => { 
+                      console.error("User Delete Error:", e); 
+                      toast.error("Error: " + e.message);
                     });
                   }
                 }}
@@ -2485,21 +2476,19 @@ function Dashboard() {
               <button
                 onClick={() => {
                   if (deleteConfirmation.trim().toLowerCase() === `confirm ${publishedProjectToDelete.title}`.trim().toLowerCase()) {
-                    import('firebase/firestore').then(({ doc, deleteDoc }) => {
-                      deleteDoc(doc(db, 'published_projects', publishedProjectToDelete.id)).then(() => {
-                        if (deletePrivateToo) {
-                          if (publishedProjectToDelete.originalProjectId) {
-                            deleteDoc(doc(db, 'projects', publishedProjectToDelete.originalProjectId)).catch(console.warn);
-                          } else {
-                            toast.error(t('olderVersionDeleteWarning'));
-                          }
+                    deleteDoc(doc(db, 'published_projects', publishedProjectToDelete.id)).then(() => {
+                      if (deletePrivateToo) {
+                        if (publishedProjectToDelete.originalProjectId) {
+                          deleteDoc(doc(db, 'projects', publishedProjectToDelete.originalProjectId)).catch(console.warn);
+                        } else {
+                          toast.error(t('olderVersionDeleteWarning'));
                         }
-                        setPublishedProjects(prev => prev.filter(p => p.id !== publishedProjectToDelete.id));
-                        setPublishedProjectToDelete(null);
-                      }).catch(e => {
-                        console.error("Delete published project error:", e);
-                        toast.error(t('deleteError'));
-                      });
+                      }
+                      setPublishedProjects(prev => prev.filter(p => p.id !== publishedProjectToDelete.id));
+                      setPublishedProjectToDelete(null);
+                    }).catch(e => {
+                      console.error("Delete published project error:", e);
+                      toast.error(t('deleteError'));
                     });
                   }
                 }}
@@ -2527,16 +2516,14 @@ function AppRoutes() {
   const [isSystemOffline, setIsSystemOffline] = React.useState(false);
 
   React.useEffect(() => {
-    import('firebase/firestore').then(({ doc, onSnapshot }) => {
-      const unsub = onSnapshot(doc(db, 'settings', 'system'), (snapshot) => {
-        if (snapshot.exists()) {
-          setIsSystemOffline(snapshot.data().isOffline);
-        } else {
-          setIsSystemOffline(false);
-        }
-      });
-      return () => unsub();
+    const unsub = onSnapshot(doc(db, 'settings', 'system'), (snapshot) => {
+      if (snapshot.exists()) {
+        setIsSystemOffline(snapshot.data().isOffline);
+      } else {
+        setIsSystemOffline(false);
+      }
     });
+    return () => unsub();
   }, []);
 
   if (loading) return null;
@@ -2549,7 +2536,7 @@ function AppRoutes() {
           <h1 className="text-2xl font-bold text-slate-100 mb-2">{t('maintenanceModeTitle')}</h1>
           <p className="text-slate-400 mb-6">{t('maintenanceModeDesc')}</p>
           {user && (
-            <button onClick={() => import('firebase/auth').then(({ signOut }) => signOut(auth))} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2 rounded-lg">
+            <button onClick={() => signOut(auth)} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2 rounded-lg">
               {t('logout')}
             </button>
           )}

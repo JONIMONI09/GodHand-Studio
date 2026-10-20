@@ -100,3 +100,12 @@
   - Implement realistic step staging (300-380ms per step, ~2.4s total) with live progress percentages, step descriptions, and comprehensive console logs.
   - In `ciSession.ts` and `ciSession.mjs`, support dual polling: both IssueOps issue comments and public GitHub Actions workflow runs (`actions/runs`), enabling users to track cloud builds directly on the website without opening GitHub or entering any tokens.
   - Ensure `targetMod` paths like `mods/arm32-fix` are strictly sanitized to clean filenames like `arm32-fix-1.0.0.jar` rather than `mods/arm32-fix-1.0.0.jar`.
+
+### 16. Vite Peer Dependency Incompatibility (ERESOLVE) & Dependabot Version Pinning
+- **Problem**: Dependabot opened a PR bumping `vite` from `5.4.21` to `8.3.4` in `dashboard/package.json`. Merging this PR broke CI workflows (`GodHand Continuous Integration`, `Deploy to GitHub Pages`, `Fallow Security and Codebase Intelligence`) with `ERESOLVE could not resolve dependency: peer vite@"^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0" from @vitejs/plugin-react@4.7.0`. Furthermore, running `npm ci` on the root workspace invoked `postinstall: npm install --prefix dashboard`, causing premature dependency failures.
+- **Correction**:
+  - Keep `vite` pinned to `^5.2.11` (resolving to `5.4.21`) in `dashboard/package.json` to maintain 100% peer dependency compatibility with `@vitejs/plugin-react`.
+  - In `.github/dependabot.yml`, add explicit exclusions for `vite` (`versions: [">=6.0.0"]`) in addition to `semver-major` ignore rules.
+  - In all GitHub Actions CI workflows (`ci.yml`, `pages.yml`, `fallow.yml`), use `npm ci --ignore-scripts` for root repository dependency installation before running `npm ci --prefix dashboard`.
+  - In `dashboard/vite.config.ts`, split large vendor dependencies (like `firebase`) into dedicated chunks (`manualChunks`) to prevent bundle size threshold warnings and maintain sub-5s production builds.
+  - Enforce single-agent rapid execution and a strict depth limit of 1 (no nested subagents) to prevent agent sprawl.

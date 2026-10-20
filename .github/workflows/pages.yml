@@ -41,7 +41,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npm ci --prefix dashboard
 
       - name: Prebuild Mod JAR and Bytecode
