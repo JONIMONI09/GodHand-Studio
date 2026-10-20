@@ -16,3 +16,6 @@
 6. **Local CI Pipeline & Dependabot Major Update Guardrail**:
    - Always run `npm run test:ci` (`node scripts/run-ci-local.mjs`) locally to verify all 5 stages (VFS bundle generation, TypeScript linting, Vite build, 105+ Node test suites, and Gradle remapJar).
    - In `.github/dependabot.yml`, ignore all `semver-major` updates (`dependency-name: "*"`) to prevent breaking changes in core frameworks (React 18 / Express 4) from breaking CI.
+7. **Strict Subagent Recursion Limit & Rapid Direct Execution**:
+   - Never spawn unnecessary swarms of subagents. Maintain a maximum depth limit of 1 (strictly no nested subagents) and default to single-agent direct execution for speed and stability.
+   - Run focused, time-bounded verification using local fast CI (pm run test:ci:fast) instead of prolonged open-ended checks.

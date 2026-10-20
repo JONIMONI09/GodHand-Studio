@@ -11,6 +11,8 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        versions: [">=6.0.0"]
 
   - package-ecosystem: "npm"
     directory: "/"
@@ -23,3 +25,5 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        versions: [">=6.0.0"]
