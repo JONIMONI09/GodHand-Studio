@@ -1,7 +1,7 @@
-# Von VibeWorks angelegt: kostenloser Repo-Check ohne KI – Geheimnisse (Gitleaks),
-# Sicherheitslücken (OSV-Scanner), Fehlermuster (Semgrep) und offene Stellen (TODO/FIXME).
-# Das Ergebnis liegt als Artefakt „vibeworks-check“ bereit, VibeWorks holt es selbst ab.
-# Datei löschen = Check aus.
+# Created by VibeWorks: automated repo check without AI - secrets (Gitleaks),
+# vulnerabilities (OSV-Scanner), flaw patterns (Semgrep) and open items (TODO/FIXME).
+# Results are saved as artifact 'vibeworks-check'.
+# Delete file to disable check.
 name: VibeWorks Repo-Check
 
 on:
@@ -26,10 +26,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Die Prüf-Container sehen das Repository – aber nicht das Token in .git/config
+          # Container inspects the repo without exposing the token in .git/config
           persist-credentials: false
 
-      - name: Geheimnisse (Gitleaks)
+      - name: Secrets Detection (Gitleaks)
         continue-on-error: true
         run: >-
           docker run --rm -v "$PWD:/repo"
@@ -37,25 +37,25 @@ jobs:
           zricethezav/gitleaks:latest detect --source /repo --no-banner --redact
           --report-format json --report-path /repo/.vw-gitleaks.json --exit-code 0
 
-      - name: Sicherheitslücken (OSV-Scanner)
+      - name: Security Vulnerabilities (OSV-Scanner)
         continue-on-error: true
         run: >-
           docker run --rm -v "$PWD:/src" ghcr.io/google/osv-scanner:latest
           scan source --recursive --format json --output-file /src/.vw-osv.json /src
 
-      - name: Fehlermuster (Semgrep)
+      - name: Code Flaws (Semgrep)
         continue-on-error: true
         run: >-
           docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep
           semgrep scan --config p/default --json --metrics off --quiet --output /src/.vw-semgrep.json
 
-      - name: Offene Stellen (TODO/FIXME)
+      - name: Open Annotations (TODO/FIXME)
         continue-on-error: true
-        # Nur Kommentare (// # /* * -- <!--) – nicht jedes Wort „TODO“ im Code
+        # Comments only (// # /* * -- <!--) - not arbitrary text matches
         run: |
           git grep -n -I -E '(//|#|/\*|\*|--|<!--)[[:space:]]*(TODO|FIXME|HACK|XXX)\b' -- ':!*.lock' ':!package-lock.json' ':!.github/workflows/vibeworks-check.yml' > .vw-todos.txt || true
 
-      - name: Zusammenfassen
+      - name: Aggregate Summary
         run: |
           python3 - <<'PY'
           import datetime, json, os

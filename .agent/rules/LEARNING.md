@@ -63,5 +63,10 @@
   - In `vite.config.ts`, set `base: './'` to enforce relative asset paths for universal portability across GitHub Pages, Firebase Hosting, and local Express static serving.
   - Utilize `HashRouter` for client-side routing on static CDNs to eliminate 404 Not Found errors on deep link reloads.
 
-
-
+### 11. Strict English Language Directive for Plugins, Code, and Documentation
+- **Problem**: German strings, comments, or labels were accidentally introduced into configuration files, workflow definitions (e.g. `gradle.yml`, `vibeworks-check.yml`), plugin UIs, and documentation. While chat conversations with the user must strictly remain in German, all written project code, markdown files, configurations, plugin UI labels, and commit messages MUST be exclusively in English.
+- **Correction**:
+  - Enforce a strict separation: User Chat = German; ALL Files/Artifacts/Plugins = English.
+  - Audit all plugin configurations (e.g., `persistent-memory-plugin`), documentation, and UI components to ensure zero German text leakage.
+  - In workflow files and scripts, write all comments, step descriptions, and log outputs in English.
+  - In dashboard UI, use English as the default canonical dictionary key source and English labels in sidecars/plugins.

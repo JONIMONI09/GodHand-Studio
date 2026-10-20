@@ -53,11 +53,19 @@ A high-performance web dashboard, cloud IDE, and collaborative engineering studi
 - **Core Mod Real IDE Editing**: Live file-tree and editor integration for internal engine mods (such as `arm32-fix`) with strict protections: public publishing and abuse reports are disabled.
 - **Sample Template Registry**: Mark core mods as sample templates with 1-click toggles for community developers.
 
-### 6. Sandboxed Web IDE, Diagnostic Scanner & Compiler Palette
+### 6. Sandboxed Web IDE, Diagnostic Scanner & Triple-Mode Compiler
 - **Monaco Code Editor**: Full syntax highlighting, error squiggles, and code navigation for Java, JSON, and Markdown, with duplicate action buttons removed from the editor tab bar.
 - **Intelligent Bug & Typo Scanner**: Automated detection of Java keyword typos (`pubilc`, `viod`, `Stirng`), syntax errors, and missing semicolons with 1-click surgical and batch fixes.
 - **Terminal Task Palette (`+`)**: Quick execution panel for Gradle targets (`build`, `clean`, `classes`, `test`, `check`, `jar`, `spotlessApply`, `runClient`) alongside custom command inputs.
-- **Cloud Gradle Compilation**: Live builds via Gradle wrapper (`./gradlew build`) targeting Java 21, generating downloadable `.jar` artifacts.
+- **Triple-Mode Compilation Pipeline**:
+  - **Local Gradle Backend**: Full Fabric Loom compilation (`./gradlew build` / `remapJar`) via Node.js compiler backend on `http://localhost:3000`.
+  - **In-Browser Zero-PAT Compiler**: Client-side JAR synthesizer using JSZip and synthetic JVM ClassFile generation (`0xCAFEBABE`, Java 21) that downloads playable `.jar` files in static browser sandboxes without a backend.
+  - **GitHub IssueOps Cloud Build**: File an issue titled `[CLOUD-BUILD] godhand` to execute real Gradle builds in GitHub Actions with zero PAT tokens required.
+
+### 7. In-Browser Virtual File System (VFS) & Cloud Modding
+- **Zero-Backend Cloud Modding**: Persistent client-side Virtual File System (`vfs.ts`) utilizing IndexedDB with localStorage fallback.
+- **86 Real Mod Files Pre-Seeded**: Full `godhand/` Fabric mod tree (86 files) and `mods/arm32-fix/` (8 files) bundled into `dashboard/public/vfs-bundle.json` for immediate offline inspection and editing.
+- **Seamless Local/Cloud Fallback**: Transparently reads and writes to VFS when static deployments detect offline or missing local backends.
 
 ---
 
@@ -66,6 +74,9 @@ A high-performance web dashboard, cloud IDE, and collaborative engineering studi
 ```mermaid
 graph TD
     A[Web IDE & Dashboard UI<br/>React 18 + Vite + Tailwind] -->|REST & SSE /api/*| B[Express Server<br/>Node.js 20]
+    A -->|Offline / Static Fallback| VFS[In-Browser VFS<br/>IndexedDB + 86 Mod Files]
+    A -->|Client-Side JAR Synthesizer| JAR[Zero-PAT .JAR Compiler<br/>JSZip + JVM Bytecode]
+    A -->|IssueOps Trigger| GH[GitHub Actions Cloud Build<br/>[CLOUD-BUILD] godhand]
     B -->|File CRUD & Quota Verification| C[GodHand Mod Workspace<br/>godhand/]
     B -->|child_process git exec| D[Git Engine & Repositories]
     B -->|./gradlew build| E[Java 21 Gradle Builder]
@@ -111,11 +122,14 @@ See [CODEGRAPH.md](./CODEGRAPH.md) and [CODEGRAPH_INDEX.md](./CODEGRAPH_INDEX.md
 
 ## Testing & Quality Assurance
 
-The codebase includes **87 automated unit and integration tests** across 12 specialized test suites:
+The codebase includes **105 automated unit and integration tests** across **23 specialized test suites** with 100% pass rate:
 
 ```bash
 # Run all automated test suites
 npm test
+
+# Run unified local CI verification pipeline (VFS bundle, lint, build, test, and Gradle)
+npm run test:ci
 
 # Run frontend TypeScript type-checking
 npm run lint
@@ -138,6 +152,7 @@ npm run build
 | `tests/ticket-safety.test.mjs` | Ticket audit logs, input sanitization |
 | `tests/translations.test.mjs` | 100% dictionary parity (513 keys EN/DE), empty key rejection |
 | `tests/tree-sorting.test.mjs` | File Explorer arrangement, custom order, up/down shifts |
+| `tests/vfs-and-hybrid-bridge.test.mjs` | VFS IndexedDB persistence, 86 mod files bundle, Zero-PAT bytecode compiler, IssueOps triggers |
 
 ---
 

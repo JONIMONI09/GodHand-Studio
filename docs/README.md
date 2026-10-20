@@ -68,14 +68,22 @@ To run the Web Dashboard test suite:
 npm test
 ```
 
+To run the unified local CI verification pipeline (VFS bundle, lint, build, test, and Gradle):
+```bash
+npm run test:ci
+```
+
 ## 🌐 Web Dashboard & Team Studio
 
 The integrated GodHand Web Studio provides:
 - **Cloud Web-IDE**: Full-featured Monaco editor with Java and TypeScript syntax highlighting.
+- **In-Browser VFS Persistence**: IndexedDB-backed Virtual File System pre-seeded with 86 real mod files from `godhand/` and 8 files from `mods/arm32-fix/`.
+- **Zero-PAT In-Browser .JAR Compiler**: Pure client-side JAR synthesizer using JSZip and synthetic JVM ClassFile generation (`0xCAFEBABE`, Java 21) with zero PAT tokens required.
+- **GitHub IssueOps Cloud Build**: File an issue titled `[CLOUD-BUILD] godhand` to compile the mod on GitHub Actions infrastructure.
 - **Custom Explorer Ordering**: Custom vertical file arrangement with 1-click controls and drag-and-drop.
 - **Git Studio**: Branch branching, version rollback, diff viewer, and history inspection.
 - **Team & Ticket System**: Staff Discord-style communications, support ticket assignment, and owner audit logs.
-- For complete architecture details, refer to [DOCUMENTATION.md](../DOCUMENTATION.md) and [error.md](../error.md).
+- For complete architecture details, refer to [DOCUMENTATION.md](../DOCUMENTATION.md) and [DEVELOPER_DOCUMENTATION.md](./DEVELOPER_DOCUMENTATION.md).
 
 ## 📜 License
 

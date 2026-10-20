@@ -76,9 +76,30 @@ Restricts administrative commands to authorized server operators.
 - Point-in-time full project restoration via `/api/git/restore`.
 
 ### 3.4. Automated Unit Test Suite (`npm test`)
-25 automated unit tests across 5 suites:
-1. `tests/tree-sorting.test.mjs` (8 tests): Sorting algorithms, custom order, drag-and-drop insertions, null-safety.
-2. `tests/git-safety.test.mjs` (7 tests): Checkpoints, branch validation, shell escaping, rollback safety.
-3. `tests/fs-api-safety.test.mjs` (4 tests): Path sanitization, traversal protection, 5MB upload quota.
-4. `tests/role-permissions.test.mjs` (3 tests): RBAC hierarchy, tab access, ticket claiming.
-5. `tests/translations.test.mjs` (3 tests): 317 EN / 317 DE keys, 100% key parity, zero undefined mappings.
+105 automated unit and integration tests across 23 suites running with Node's native test runner (`node --test tests/*.test.mjs`):
+1. `tests/tree-sorting.test.mjs`: Sorting algorithms, custom order, drag-and-drop insertions, null-safety.
+2. `tests/git-safety.test.mjs`: Checkpoints, branch validation, shell escaping, rollback safety.
+3. `tests/fs-api-safety.test.mjs`: Path sanitization, traversal protection, 5MB upload quota.
+4. `tests/role-permissions.test.mjs`: RBAC hierarchy, tab access, ticket claiming.
+5. `tests/translations.test.mjs`: 513 EN / 513 DE keys, 100% key parity, zero undefined mappings.
+6. `tests/vfs-and-hybrid-bridge.test.mjs`: VFS IndexedDB persistence, 86 mod files bundle, Zero-PAT bytecode compiler, IssueOps cloud triggers.
+7. `tests/client-bridge.test.mjs`: Platform invocation, JSON parsing safety, Adoptium JDK download metrics.
+8. `tests/autoscan.test.mjs`: Automated background Java typo detection & surgical fixes.
+9. `tests/gameplay.test.mjs`: WebAssembly & Canvas voxel runtime lifecycle simulation.
+10. `tests/multi-loader-and-compiler.test.mjs`: Multi-loader scaffolding and Gradle task execution.
+
+### 3.5. In-Browser Virtual File System (VFS) & Seed Bundle
+- **IndexedDB Persistence**: Implemented in `dashboard/src/lib/vfs.ts` with local storage fallbacks, eliminating dependencies on local backends when hosted on static CDN providers.
+- **86 Real Mod Files Pre-Seeded**: `scripts/generate-vfs-bundle.mjs` scans `godhand/` and `mods/arm32-fix/`, compiling a complete virtual mod tree with 86 real Java and JSON files directly into `dashboard/public/vfs-bundle.json`.
+
+### 3.6. Zero-PAT Browser Compiler & GitHub IssueOps Bridge
+- **In-Browser JAR Synthesizer**: Pure client-side generation in `dashboard/src/lib/jarCompiler.ts` creating valid `.jar` ZIP archives with generated JVM bytecode ClassFiles (`0xCAFEBABE`, Java 21 ClassFormat 65.0) and manifest structures.
+- **IssueOps Compilation Bridge**: When full Loom bytecode remapping is required, users without local Java installations file an issue with prefix `[CLOUD-BUILD]` to trigger `.github/workflows/gradle.yml`, which executes real Gradle wrapper compilation in GitHub Actions with zero PAT tokens required.
+
+### 3.7. Unified Local CI Verification Pipeline
+- Script `scripts/run-ci-local.mjs` (invoked via `npm run test:ci` or `npm run test:ci:fast`) executes all verification checks in a single automated pipeline:
+  1. VFS Bundle Generation (`node scripts/generate-vfs-bundle.mjs`)
+  2. Dashboard TypeScript Linting (`tsc --noEmit`)
+  3. Dashboard Vite Production Build (`vite build`)
+  4. Node.js Test Suites (`node --test tests/*.test.mjs`)
+  5. Java / Gradle Tests & Remapping (`gradlew test remapJar` in `godhand/`)

@@ -10,6 +10,8 @@
     "start": "npm run start --prefix dashboard",
     "lint": "npm run lint --prefix dashboard",
     "test": "node --test tests/*.test.mjs",
+    "test:ci": "node scripts/run-ci-local.mjs",
+    "test:ci:fast": "node scripts/run-ci-local.mjs --fast",
     "codegraph": "node scripts/codegraph.mjs",
     "build:arm32": "python3 scripts/build-arm32-mod.py"
   },

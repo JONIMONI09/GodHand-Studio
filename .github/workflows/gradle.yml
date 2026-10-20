@@ -46,7 +46,7 @@ jobs:
       uses: gradle/actions/setup-gradle@v4
 
     - name: Make Gradle Wrapper executable
-      # Minecraft Mods brauchen oft manuell die Berechtigung, das Gradle-Skript auszuführen, sonst crasht der Build direkt.
+      # Minecraft mods often require explicit execute permissions for the wrapper script to avoid build failures.
       run: |
         chmod +x godhand/gradlew || true
         if [ -d "mods" ]; then
