@@ -13,13 +13,16 @@ on:
         description: 'Target mod folder to build (e.g. godhand or mods/arm32-fix)'
         required: false
         default: 'godhand'
+  issues:
+    types: [opened]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: write
+      issues: write
 
     steps:
     - name: Checkout Repository
@@ -52,7 +55,19 @@ jobs:
 
     - name: Build with Gradle Wrapper (and Run Tests)
       run: |
-        TARGET="${{ github.event.inputs.targetMod || 'godhand' }}"
+        if [ "${{ github.event_name }}" = "issues" ]; then
+          TITLE="${{ github.event.issue.title }}"
+          if echo "$TITLE" | grep -q "\[CLOUD-BUILD\]"; then
+            TARGET=$(echo "$TITLE" | sed 's/\[CLOUD-BUILD\]//' | tr -d ' ' | tr -d '\r' | tr -d '\n')
+            echo "Detected IssueOps Cloud Build request for target: $TARGET"
+          else
+            echo "Not a [CLOUD-BUILD] issue. Skipping build."
+            exit 0
+          fi
+        else
+          TARGET="${{ github.event.inputs.targetMod || 'godhand' }}"
+        fi
+
         if [ -d "$TARGET" ]; then
           echo "Building target mod directory: $TARGET"
           cd "$TARGET"
@@ -66,6 +81,20 @@ jobs:
           cd godhand
           ./gradlew build
         fi
+
+    - name: Comment on Issue
+      if: github.event_name == 'issues' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}' === 'success' ? '✅ **Success**' : '❌ **Failed**';
+          const body = status + ' - Cloud Build completed for run: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + '\n\nCompiled JAR artifacts are available under the workflow run and Releases.';
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });
 
     - name: Upload test report
       if: failure()

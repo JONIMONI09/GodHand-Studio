@@ -157,4 +157,65 @@ describe('In-Browser Virtual File System (VFS) & Hybrid Cloud Bridge Suite', () 
     const ps1Content = fs.readFileSync(ps1Path, 'utf8');
     assert.ok(ps1Content.includes('dashboard\\node_modules') || ps1Content.includes('dashboard/node_modules'), 'PowerShell launcher must verify dashboard node_modules');
   });
+
+  it('verifies vfs-bundle.json contains 35+ real Java classes and complete mod workspaces', () => {
+    const bundlePath = path.resolve(rootDir, 'dashboard/public/vfs-bundle.json');
+    assert.ok(fs.existsSync(bundlePath), 'dashboard/public/vfs-bundle.json must exist');
+
+    const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+    assert.ok(bundle.projects, 'Bundle must contain projects object');
+    assert.ok(bundle.projects.godhand, 'Bundle must contain godhand project');
+    assert.ok(bundle.projects['arm32-fix'], 'Bundle must contain arm32-fix project');
+
+    const godhandFiles = Object.keys(bundle.projects.godhand);
+    assert.ok(godhandFiles.length >= 35, `godhand project must have at least 35 files, found ${godhandFiles.length}`);
+
+    // Verify key mod classes and resources
+    assert.ok(godhandFiles.some(f => f.includes('GodHand.java')), 'Must contain GodHand.java');
+    assert.ok(godhandFiles.some(f => f.includes('CompanionManager.java')), 'Must contain CompanionManager.java');
+    assert.ok(godhandFiles.some(f => f.includes('fabric.mod.json')), 'Must contain fabric.mod.json');
+    assert.ok(godhandFiles.some(f => f.includes('assets/godhand/lang/de_de.json')), 'Must contain de_de.json');
+
+    const arm32Files = Object.keys(bundle.projects['arm32-fix']);
+    assert.ok(arm32Files.some(f => f.includes('Arm32FixMod.java')), 'Must contain Arm32FixMod.java');
+  });
+
+  it('verifies jarCompiler.ts implements Zero-PAT JVM bytecode ClassFile generation (0xCAFEBABE, Java 21)', () => {
+    const compilerPath = path.resolve(rootDir, 'dashboard/src/lib/jarCompiler.ts');
+    assert.ok(fs.existsSync(compilerPath), 'jarCompiler.ts must exist');
+
+    const compilerCode = fs.readFileSync(compilerPath, 'utf8');
+    assert.ok(compilerCode.includes('0xcafebabe'), 'Must synthesize standard JVM magic bytes 0xCAFEBABE');
+    assert.ok(compilerCode.includes('65'), 'Must target Java 21 major bytecode version 65');
+    assert.ok(compilerCode.includes('META-INF/MANIFEST.MF'), 'Must generate META-INF/MANIFEST.MF');
+    assert.ok(compilerCode.includes('compileModToJar'), 'Must export compileModToJar function');
+    assert.ok(!compilerCode.includes('githubPat'), 'jarCompiler must not require any GitHub PAT');
+  });
+
+  it('verifies .github/workflows/gradle.yml implements Zero-PAT IssueOps cloud compilation trigger', () => {
+    const gradleWorkflowPath = path.resolve(rootDir, '.github/workflows/gradle.yml');
+    assert.ok(fs.existsSync(gradleWorkflowPath), 'gradle.yml must exist');
+
+    const content = fs.readFileSync(gradleWorkflowPath, 'utf8');
+    assert.ok(content.includes('issues:'), 'Must trigger on issues');
+    assert.ok(content.includes('types: [opened]'), 'Must trigger on issue opened');
+    assert.ok(content.includes('[CLOUD-BUILD]'), 'Must detect [CLOUD-BUILD] issues');
+    assert.ok(content.includes('actions/github-script'), 'Must use built-in actions/github-script for comment');
+    assert.ok(content.includes('issues: write'), 'Must grant issues: write permissions to job');
+  });
+
+  it('verifies dashboard/server.js serves both root and /GodHand-Studio subpath without 404', () => {
+    const serverCode = fs.readFileSync(serverPath, 'utf8');
+    assert.ok(serverCode.includes("app.use('/GodHand-Studio', express.static(distDir))"), 'Must serve static files on /GodHand-Studio');
+    assert.ok(serverCode.includes('/GodHand-Studio/*'), 'Must provide SPA catch-all on /GodHand-Studio/*');
+  });
+
+  it('verifies App.tsx eliminates overlapping banners and fake popups', () => {
+    const appPath = path.resolve(rootDir, 'dashboard/src/App.tsx');
+    const appCode = fs.readFileSync(appPath, 'utf8');
+
+    assert.ok(!appCode.includes('<LocalhostBanner />'), 'Must not render top LocalhostBanner overlay');
+    assert.ok(!appCode.includes('<SDKDownloadModal />'), 'Must not render fake SDKDownloadModal popup');
+  });
 });
+

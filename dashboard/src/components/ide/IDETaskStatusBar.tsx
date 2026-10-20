@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle2, 
   AlertCircle, 
@@ -7,9 +7,13 @@ import {
   Gamepad2, 
   Terminal, 
   Layers, 
-  Cpu 
+  Cpu,
+  Server,
+  Cloud
 } from 'lucide-react';
 import { useTranslation } from '../../i18n/translations';
+import { probeBackendStatus } from '../../lib/api';
+import { toast } from 'react-hot-toast';
 
 interface IDETaskStatusBarProps {
   isBuilding: boolean;
@@ -33,17 +37,69 @@ export const IDETaskStatusBar: React.FC<IDETaskStatusBarProps> = ({
   onSelectTab
 }) => {
   const { t, language } = useTranslation();
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
+  const [isPinging, setIsPinging] = useState(false);
+
+  useEffect(() => {
+    probeBackendStatus().then(online => setIsBackendOnline(online));
+    const interval = setInterval(() => {
+      probeBackendStatus().then(online => setIsBackendOnline(online));
+    }, 12000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleConnectLocalhost = async () => {
+    setIsPinging(true);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1500);
+      const res = await fetch('http://localhost:3000/api/health', { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        setIsBackendOnline(true);
+        toast.success(language === 'de' ? 'Localhost (3000) erreichbar! Verbinde...' : 'Localhost (3000) online! Connecting...');
+        const cleanHash = window.location.hash || '#/ide/godhand';
+        window.location.href = `http://localhost:3000/${cleanHash}`;
+        return;
+      }
+    } catch (_) {}
+    setIsPinging(false);
+    setIsBackendOnline(false);
+    toast(
+      language === 'de'
+        ? 'Lokaler Server (localhost:3000) nicht erreichbar. GodHand Studio läuft bereits 100% autark im Browser-Modus!'
+        : 'Local server (localhost:3000) unreachable. GodHand Studio is already running 100% standalone in Browser Mode!',
+      { icon: 'ℹ️', duration: 4000 }
+    );
+  };
 
   const activeTaskCount = (isBuilding ? 1 : 0) + (isScanning ? 1 : 0) + (clientStatus === 'starting' ? 1 : 0);
 
   return (
     <div className="h-7 bg-[#181818] border-t border-[#2d2d2d] px-3 flex items-center justify-between text-xs text-slate-400 select-none shrink-0 z-20">
       {/* Left side: System & Engine Readiness */}
-      <div className="flex items-center gap-3">
-        <span className="flex items-center gap-1.5 text-slate-300 font-medium">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-          GodHand Fabric IDE
-        </span>
+      <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 font-medium">
+          <span className={`w-2 h-2 rounded-full inline-block ${isBackendOnline ? 'bg-emerald-400 animate-pulse' : 'bg-emerald-500'}`} />
+          <span className="text-slate-300">
+            {isBackendOnline
+              ? 'Local Server Connected (localhost:3000)'
+              : (language === 'de' ? 'Browser Studio Aktiv (Offline-Ready)' : 'Browser Studio Active (Offline-Ready)')}
+          </span>
+        </div>
+
+        {!isBackendOnline && typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (
+          <button
+            onClick={handleConnectLocalhost}
+            disabled={isPinging}
+            className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 rounded text-[11px] text-indigo-300 hover:text-white transition"
+            title="Sicher mit http://localhost:3000 verbinden"
+          >
+            {isPinging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Server className="w-3 h-3" />}
+            <span>{language === 'de' ? 'Localhost verbinden' : 'Connect Localhost'}</span>
+          </button>
+        )}
+
         <span className="text-slate-600">|</span>
         <span className="font-mono text-[11px] text-slate-400">Java 21 LTS</span>
         <span className="text-slate-600">|</span>

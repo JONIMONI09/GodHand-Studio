@@ -29,6 +29,7 @@ import { BrowserVFS } from '../../lib/vfs';
 
 interface IDEFileExplorerProps {
   onRefreshTree?: () => Promise<void>;
+  onSelectMod?: (modId: string) => void;
   projectId?: string;
   isSidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -66,6 +67,7 @@ interface IDEFileExplorerProps {
 
 export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
   onRefreshTree,
+  onSelectMod,
   projectId,
   isSidebarCollapsed,
   onToggleSidebar,
@@ -699,6 +701,40 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
               <X className="h-4 w-4" />
             </button>
           </div>
+        </div>
+
+        {/* Project Switcher & Defaults Reset */}
+        <div className="px-3 py-2 border-b border-[#2d2d2d] bg-[#1e1e22] flex flex-col gap-1.5 select-none shrink-0">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              {language === 'de' ? 'Aktives Mod-Projekt' : 'Active Mod Project'}
+            </span>
+            <button
+              onClick={async () => {
+                const target = projectId || 'godhand';
+                const count = await BrowserVFS.resetWorkspaceToDefaults(target);
+                toast.success(language === 'de' ? `${count} Dateien auf Repository-Standard zurückgesetzt!` : `Reset ${count} files to repository defaults!`);
+                if (onRefreshTree) await onRefreshTree();
+              }}
+              className="text-[10px] text-amber-400 hover:text-amber-300 transition flex items-center gap-1 font-mono hover:underline"
+              title={language === 'de' ? 'Dateien auf Original-Repository zurücksetzen' : 'Reset files to repository defaults'}
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              <span>{language === 'de' ? 'Standard laden' : 'Reset Defaults'}</span>
+            </button>
+          </div>
+          <select
+            value={projectId === 'arm32-fix' ? 'arm32-fix' : 'godhand'}
+            onChange={(e) => {
+              if (onSelectMod) {
+                onSelectMod(e.target.value);
+              }
+            }}
+            className="w-full bg-[#2a2a30] border border-[#3e3e48] rounded px-2 py-1 text-xs text-white focus:outline-hidden focus:border-indigo-500 font-medium"
+          >
+            <option value="godhand">GodHand Core Mod (35+ Klassen)</option>
+            <option value="arm32-fix">ARM32 Alignment Fix Mod</option>
+          </select>
         </div>
 
         {/* Tree Content Area */}

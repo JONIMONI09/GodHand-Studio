@@ -3,13 +3,13 @@
 
 FROM eclipse-temurin:21-jdk-jammy AS base
 
-# Install Node.js 20, git, curl
+# Install Node.js 22, git, curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     ca-certificates \
     build-essential \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

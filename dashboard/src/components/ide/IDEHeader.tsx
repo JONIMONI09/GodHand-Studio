@@ -33,6 +33,7 @@ import {
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useTranslation } from '../../i18n/translations';
 import { BrowserVFS } from '../../lib/vfs';
+import { compileModToJar, downloadBlob } from '../../lib/jarCompiler';
 import { toast } from 'react-hot-toast';
 
 interface IDEHeaderProps {
@@ -105,9 +106,6 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
   // Cloud Compiler & Mod Packager Modal State
   const [showCloudBuildModal, setShowCloudBuildModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [githubPat, setGithubPat] = useState('');
-  const [isDispatching, setIsDispatching] = useState(false);
-  const [dispatchSuccess, setDispatchSuccess] = useState(false);
 
   const handleCreateNewMod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,16 +179,13 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
     setIsExporting(true);
     try {
       const activeProj = projectId || 'godhand';
-      const blob = await BrowserVFS.exportJar(activeProj);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${activeProj}.jar`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(language === 'de' ? 'Mod-Bundle (.jar) erfolgreich generiert!' : 'Mod bundle (.jar) packaged successfully!');
+      const res = await compileModToJar(activeProj);
+      if (res.success && res.blob) {
+        downloadBlob(res.blob, res.filename);
+        toast.success(language === 'de' ? `Kompilierung erfolgreich: ${res.filename} heruntergeladen!` : `Compilation successful: Downloaded ${res.filename}!`);
+      } else {
+        toast.error(language === 'de' ? `Kompilierung fehlgeschlagen (${res.diagnostics.length} Fehler)` : `Build failed with ${res.diagnostics.length} errors`);
+      }
     } catch (err: any) {
       toast.error('Export failed: ' + err.message);
     } finally {
@@ -198,44 +193,17 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
     }
   };
 
-  const handleTriggerGitHubAction = async () => {
-    setIsDispatching(true);
-    setDispatchSuccess(false);
-
-    try {
-      if (!githubPat.trim()) {
-        window.open('https://github.com/JONIMONI09/GodHand-Studio/actions/workflows/gradle.yml', '_blank');
-        toast(language === 'de' ? 'GitHub Actions Workflow geöffnet. Klicken Sie auf "Run workflow".' : 'Opened GitHub Actions. Click "Run workflow" to trigger build.', { icon: '🚀' });
-        return;
-      }
-
-      const res = await fetch('https://api.github.com/repos/JONIMONI09/GodHand-Studio/actions/workflows/gradle.yml/dispatches', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${githubPat.trim()}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ref: 'main',
-          inputs: {
-            targetMod: projectId || 'godhand'
-          }
-        })
-      });
-
-      if (res.ok || res.status === 204) {
-        setDispatchSuccess(true);
-        toast.success(language === 'de' ? 'GitHub Actions Cloud Build ausgelöst!' : 'GitHub Actions Cloud Build triggered!');
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `Status: ${res.status}`);
-      }
-    } catch (err: any) {
-      toast.error('Workflow dispatch error: ' + err.message);
-    } finally {
-      setIsDispatching(false);
-    }
+  const handleTriggerGitHubIssueCloudBuild = () => {
+    const activeProj = projectId || 'godhand';
+    const issueTitle = encodeURIComponent(`[CLOUD-BUILD] ${activeProj}`);
+    const issueBody = encodeURIComponent(
+      `### GodHand Studio Zero-PAT Cloud Build Trigger\n\n` +
+      `- **Target Mod Directory**: \`${activeProj}\`\n` +
+      `- **Gradle Loom Runner**: Java 21 LTS\n\n` +
+      `_This build was initiated from GodHand Studio Web IDE (Zero-PAT mode). GitHub Actions will compile this mod and comment the download link upon completion._`
+    );
+    window.open(`https://github.com/JONIMONI09/GodHand-Studio/issues/new?title=${issueTitle}&body=${issueBody}`, '_blank');
+    toast.success(language === 'de' ? 'GitHub Cloud-Build vorbereitet! Klicken Sie auf "Submit new issue".' : 'GitHub Cloud Build prepared! Click "Submit new issue".');
   };
 
   return (
@@ -634,48 +602,36 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
                 </div>
               </div>
 
-              {/* GitHub Actions Cloud Compiler */}
+              {/* GitHub Actions Cloud Compiler (IssueOps - Zero PAT Required) */}
               <div className="bg-slate-900 border border-indigo-500/20 rounded-lg p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
                     <Sparkles className="h-4 w-4 text-amber-400" />
                     <span>{t('cloudBuildWithGithub')}</span>
                   </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    100% FREE
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    ZERO PAT REQUIRED
                   </span>
                 </div>
                 <p className="text-slate-400 leading-relaxed">
-                  {t('cloudBuildDesc')}
+                  {language === 'de'
+                    ? 'Startet einen vollständigen Cloud-Build mit Gradle Loom auf GitHub Actions. Sie müssen kein Token oder Passwort eingeben – GitHub führt den Build automatisch aus!'
+                    : 'Launches a full Gradle Loom cloud compile on GitHub Actions. Zero tokens or passwords required – GitHub automatically compiles and uploads your mod JAR!'}
                 </p>
 
-                <div className="space-y-1.5">
-                  <label className="text-slate-400 text-[11px]">
-                    GitHub Personal Access Token (PAT) - optional:
-                  </label>
-                  <input
-                    type="password"
-                    value={githubPat}
-                    onChange={(e) => setGithubPat(e.target.value)}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono text-xs focus:outline-hidden focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                   <button
-                    onClick={handleTriggerGitHubAction}
-                    disabled={isDispatching}
-                    className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                    onClick={handleTriggerGitHubIssueCloudBuild}
+                    className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition font-medium flex items-center justify-center gap-1.5"
                   >
-                    {isDispatching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                    <span>{language === 'de' ? 'Workflow starten' : 'Trigger Workflow'}</span>
+                    <Play className="h-3.5 w-3.5" />
+                    <span>{language === 'de' ? '1-Click Cloud-Build (GitHub IssueOps)' : '1-Click Cloud Build (IssueOps)'}</span>
                   </button>
                   <a
                     href="https://github.com/JONIMONI09/GodHand-Studio/actions"
                     target="_blank"
                     rel="noreferrer"
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center gap-1"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center justify-center gap-1"
                   >
                     <span>Actions</span>
                     <ExternalLink className="h-3.5 w-3.5 opacity-60" />
@@ -684,19 +640,12 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
                     href="https://github.com/JONIMONI09/GodHand-Studio/releases"
                     target="_blank"
                     rel="noreferrer"
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center gap-1"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center justify-center gap-1"
                   >
                     <span>Releases</span>
                     <ExternalLink className="h-3.5 w-3.5 opacity-60" />
                   </a>
                 </div>
-
-                {dispatchSuccess && (
-                  <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded text-emerald-300 flex items-center gap-1.5 text-xs">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>{language === 'de' ? 'Build läuft auf GitHub Actions! JAR ist gleich unter Actions/Releases verfügbar.' : 'Build is running on GitHub Actions! JAR will be available under Actions/Releases.'}</span>
-                  </div>
-                )}
               </div>
             </div>
 
