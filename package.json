@@ -16,11 +16,11 @@
     "build:arm32": "python3 scripts/build-arm32-mod.py"
   },
   "dependencies": {
-    "@firebase/rules-unit-testing": "^5.0.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@monaco-editor/react": "^4.7.0",
     "codegraph": "^1.0.0",
-    "firebase": "^12.16.0",
-    "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.18.2"
+    "firebase": "^12.19.0",
+    "react-hot-toast": "^2.6.1",
+    "react-router-dom": "^7.18.4"
   }
 }
