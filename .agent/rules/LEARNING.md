@@ -70,3 +70,10 @@
   - Audit all plugin configurations (e.g., `persistent-memory-plugin`), documentation, and UI components to ensure zero German text leakage.
   - In workflow files and scripts, write all comments, step descriptions, and log outputs in English.
   - In dashboard UI, use English as the default canonical dictionary key source and English labels in sidecars/plugins.
+
+### 12. Python Sidecar String Escaping & Local CI Pipeline Guardrail
+- **Problem**: In Python sidecar templates, unescaped \n in triple-quoted strings caused literal line breaks inside double-quoted JavaScript strings, triggering SyntaxError: Invalid or unexpected token and freezing the UI. Furthermore, pushing directly to CI without running all verification stages locally led to unexpected failures on remote runners.
+- **Correction**:
+  - Always use ES6 template literals (backticks) or external static .html files when serving JavaScript from Python sidecars.
+  - Implement and run a unified local CI verification script (npm run test:ci / node scripts/run-ci-local.mjs) that validates all 5 stages (VFS bundle generation, TypeScript linting, Vite build, 105+ Node test suites, and Gradle remapJar) before pushing.
+  - In .github/dependabot.yml, configure ignore: - dependency-name: "*", update-types: ["version-update:semver-major"] to prevent automated major version bumps (like React 19 or Express 5) from breaking CI workflows.
