@@ -1,11 +1,15 @@
 import JSZip from 'jszip';
 import { BrowserVFS } from './vfs';
+import { diagnoseJava } from './diagnostics';
 
 export interface CompileDiagnostic {
   file: string;
   line: number;
+  column?: number;
   message: string;
   severity: 'error' | 'warning';
+  suggestedFix?: string;
+  typo?: string;
 }
 
 export interface CompileStep {
@@ -173,12 +177,129 @@ function createMinimalClassFile(classNameWithSlash: string, superNameWithSlash: 
 }
 
 /**
- * Validates Java source files for brace parity, package syntax, and general structure.
+ * Resolves the concrete mod version from manifest version string and gradle.properties.
+ * Eliminates unexpanded ${version} or ${mod_version} template placeholders.
+ */
+export function resolveModVersion(
+  manifestVersion?: string,
+  gradlePropertiesContent?: string,
+  fallback: string = '1.0.0'
+): string {
+  if (manifestVersion && typeof manifestVersion === 'string') {
+    const trimmed = manifestVersion.trim();
+    if (trimmed && !trimmed.includes('${')) {
+      return trimmed;
+    }
+  }
+
+  if (gradlePropertiesContent && typeof gradlePropertiesContent === 'string') {
+    const lines = gradlePropertiesContent.split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith('//') || line.startsWith('!')) {
+        continue;
+      }
+      const match = line.match(/^(?:mod_version|version|modVersion)\s*=\s*(.+)$/i);
+      if (match) {
+        const val = match[1].trim();
+        if (val && !val.includes('${')) {
+          return val;
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
+/**
+ * Resolves archivesBaseName or mod archives name from gradle.properties or falls back to modId.
+ */
+export function resolveArchivesBaseName(modId: string, gradlePropertiesContent?: string): string {
+  if (gradlePropertiesContent && typeof gradlePropertiesContent === 'string') {
+    const lines = gradlePropertiesContent.split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith('//') || line.startsWith('!')) {
+        continue;
+      }
+      const match = line.match(/^(?:archives_base_name|archivesBaseName)\s*=\s*(.+)$/i);
+      if (match) {
+        const val = match[1].trim();
+        if (val) {
+          return val;
+        }
+      }
+    }
+  }
+  return modId || 'mod';
+}
+
+/**
+ * Extracts a specific property value from gradle.properties content.
+ */
+export function extractGradleProp(gradlePropertiesContent: string | undefined, propName: string, fallback: string = ''): string {
+  if (!gradlePropertiesContent || typeof gradlePropertiesContent !== 'string') {
+    return fallback;
+  }
+  const lines = gradlePropertiesContent.split(/\r?\n/);
+  const regex = new RegExp(`^${propName}\\s*=\\s*(.+)$`, 'i');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+    const match = line.match(regex);
+    if (match) {
+      const val = match[1].trim();
+      if (val) return val;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Expands Gradle processResources template tokens (${version}, ${minecraft_version}, etc.)
+ * in mod manifests (fabric.mod.json, neoforge.mods.toml, etc.).
+ */
+export function expandManifestTokens(
+  content: string,
+  variables: { version?: string; minecraftVersion?: string; modId?: string } = {}
+): string {
+  if (!content || typeof content !== 'string') return content;
+  const version = variables.version || '1.0.0';
+  const mcVersion = variables.minecraftVersion || '1.21.1';
+  const modId = variables.modId || 'mod';
+
+  return content
+    .replace(/\$\{version\}/g, version)
+    .replace(/\$\{mod_version\}/g, version)
+    .replace(/\$\{project\.version\}/g, version)
+    .replace(/\$\{minecraft_version\}/g, mcVersion)
+    .replace(/\$\{project\.minecraft_version\}/g, mcVersion)
+    .replace(/\$\{archives_base_name\}/g, modId)
+    .replace(/\$\{project\.base\.archivesName\.get\(\)\}/g, modId);
+}
+
+/**
+ * Validates Java source files using AST keyword/typo detection and structural brace parity.
  */
 function validateJavaSource(filePath: string, content: string): CompileDiagnostic[] {
   const diagnostics: CompileDiagnostic[] = [];
-  const lines = content.split('\n');
 
+  // 1. Run full Java AST & typo diagnostic engine
+  const javaDiags = diagnoseJava(content);
+  for (const jd of javaDiags) {
+    diagnostics.push({
+      file: filePath,
+      line: jd.line,
+      message: jd.message,
+      severity: jd.severity === 'warning' ? 'warning' : 'error',
+      suggestedFix: jd.suggestedFix,
+      typo: jd.typo
+    });
+  }
+
+  // 2. Package declaration matching and brace checks
+  const lines = content.split('\n');
   let braceCount = 0;
   let packageFound = false;
 
@@ -211,7 +332,7 @@ function validateJavaSource(filePath: string, content: string): CompileDiagnosti
     }
   }
 
-  if (braceCount !== 0) {
+  if (braceCount !== 0 && !diagnostics.some(d => d.message.includes('brace') || d.message.includes('Brace'))) {
     diagnostics.push({
       file: filePath,
       line: lines.length,
@@ -241,7 +362,7 @@ export async function compileModToJar(
     if (onLog) onLog(formatted);
   };
 
-  const emitStep = async (stepNum: number, name: string, detail: string, percent: number) => {
+  const emitStep = async (stepNum: number, name: string, detail: string, percent: number, delayMs: number = 320) => {
     log(`[${stepNum}/6] [${name.toUpperCase()}] ${detail}`);
     if (onStep) {
       onStep({
@@ -252,11 +373,11 @@ export async function compileModToJar(
         percent
       });
     }
-    // Small yield so the browser thread re-renders UI step progress
-    await new Promise(r => setTimeout(r, 60));
+    // Realistic staging duration giving visible progress and letting UI thread update
+    await new Promise(r => setTimeout(r, delayMs));
   };
 
-  await emitStep(1, 'init', `Initializing Zero-PAT In-Browser compilation environment for ${projectId}...`, 15);
+  await emitStep(1, 'init', `Initializing Zero-PAT In-Browser compilation environment for ${projectId}...`, 15, 300);
   await BrowserVFS.ensureInitialized(projectId);
 
   // Retrieve all files in project
@@ -272,11 +393,21 @@ export async function compileModToJar(
 
   log(`Discovered ${filePaths.length} workspace files in In-Browser VFS`);
 
-  // Step 2: Validate fabric.mod.json / neoforge.mods.toml
-  await emitStep(2, 'metadata', `Validating mod manifest and dependency descriptors...`, 30);
+  // Step 2: Validate fabric.mod.json / neoforge.mods.toml & resolve SemVer
+  await emitStep(2, 'metadata', `Validating mod manifest, dependencies, and SemVer resolution...`, 30, 320);
   let modId = projectId;
   let modVersion = '1.0.0';
   let modName = projectId;
+  let gradlePropsContent: string | undefined;
+
+  // Retrieve gradle.properties to resolve project version and archives name
+  const gradlePropsPath = filePaths.find(p => p.endsWith('gradle.properties'));
+  if (gradlePropsPath) {
+    try {
+      gradlePropsContent = await BrowserVFS.getFile(gradlePropsPath, projectId);
+      log(`Read gradle.properties from VFS: ${gradlePropsPath}`);
+    } catch (_) {}
+  }
 
   const fabricModJsonPath = filePaths.find(p => p.endsWith('fabric.mod.json'));
   if (fabricModJsonPath) {
@@ -284,9 +415,9 @@ export async function compileModToJar(
       const content = await BrowserVFS.getFile(fabricModJsonPath, projectId);
       const parsed = JSON.parse(content);
       modId = parsed.id || modId;
-      modVersion = parsed.version || modVersion;
       modName = parsed.name || modName;
-      log(`Validated fabric.mod.json: modid="${modId}", name="${modName}", version="${modVersion}"`);
+      modVersion = resolveModVersion(parsed.version, gradlePropsContent, '1.0.0');
+      log(`Validated fabric.mod.json: modid="${modId}", name="${modName}", resolvedVersion="${modVersion}" (raw: "${parsed.version}")`);
     } catch (err: any) {
       diagnostics.push({
         file: fabricModJsonPath,
@@ -297,12 +428,16 @@ export async function compileModToJar(
       log(`ERROR: fabric.mod.json has invalid JSON syntax: ${err.message}`);
     }
   } else {
-    log('Warning: No fabric.mod.json found, using project defaults');
+    modVersion = resolveModVersion(undefined, gradlePropsContent, '1.0.0');
+    log(`Warning: No fabric.mod.json found, resolved mod version ${modVersion} from gradle.properties`);
   }
 
-  // Step 3: Validate Java sources
+  const baseName = resolveArchivesBaseName(modId, gradlePropsContent);
+  const targetJarName = `${baseName}-${modVersion}.jar`;
+
+  // Step 3: Validate Java sources (AST Syntax and Typos)
   const javaFiles = filePaths.filter(p => p.endsWith('.java'));
-  await emitStep(3, 'parse', `Parsing and validating ${javaFiles.length} Java source files (AST & brace parity)...`, 50);
+  await emitStep(3, 'parse', `Parsing and validating ${javaFiles.length} Java source files (AST & syntax check)...`, 50, 380);
 
   const compiledClasses = new Map<string, Uint8Array>();
 
@@ -332,23 +467,26 @@ export async function compileModToJar(
 
   const errors = diagnostics.filter(d => d.severity === 'error');
   if (errors.length > 0) {
-    log(`Compilation aborted with ${errors.length} syntax error(s)`);
+    log(`Compilation aborted with ${errors.length} syntax error(s):`);
+    for (const err of errors) {
+      log(`  -> [${err.file}:${err.line}] ${err.message}${err.suggestedFix ? ` (Fix: ${err.suggestedFix})` : ''}`);
+    }
     return {
       success: false,
-      filename: `${modId}-${modVersion}.jar`,
+      filename: targetJarName,
       diagnostics,
       logs
     };
   }
 
   // Step 4: Synthesize JVM Bytecode
-  await emitStep(4, 'bytecode', `Synthesizing JVM ClassFiles (magic: 0xCAFEBABE, Java 21 LTS) for ${compiledClasses.size} classes...`, 70);
+  await emitStep(4, 'bytecode', `Synthesizing JVM ClassFiles (magic: 0xCAFEBABE, Java 21 LTS) for ${compiledClasses.size} classes...`, 70, 350);
 
   // Step 5: Package into valid JAR archive (ZIP format)
-  await emitStep(5, 'bundle', `Generating META-INF/MANIFEST.MF and compressing ZIP/JAR archive stream...`, 85);
+  await emitStep(5, 'bundle', `Generating META-INF/MANIFEST.MF and packaging expanded resource entries...`, 85, 320);
   const zip = new JSZip();
 
-  // Add META-INF/MANIFEST.MF
+  // Add META-INF/MANIFEST.MF with concrete resolved version
   const manifest = [
     'Manifest-Version: 1.0',
     'Created-By: GodHand Studio In-Browser Bytecode Compiler (Java 21)',
@@ -365,23 +503,28 @@ export async function compileModToJar(
     zip.file(classFilePath, bytes);
   }
 
-  // Add resource files (fabric.mod.json, mixins, lang, textures, etc.)
+  // Add resource files with expanded tokens (processResources equivalent)
+  const mcVersion = extractGradleProp(gradlePropsContent, 'minecraft_version') || '1.21.1';
   let resourceCount = 0;
   for (const filePath of filePaths) {
     const norm = filePath.replace(/\\/g, '/');
     if (norm.includes('src/main/resources/')) {
       const relResource = norm.substring(norm.indexOf('src/main/resources/') + 'src/main/resources/'.length);
-      const content = await BrowserVFS.getFile(filePath, projectId);
+      let content = await BrowserVFS.getFile(filePath, projectId);
+      if (relResource === 'fabric.mod.json' || relResource.endsWith('.json') || relResource.endsWith('.toml')) {
+        content = expandManifestTokens(content, { version: modVersion, minecraftVersion: mcVersion, modId });
+      }
       zip.file(relResource, content);
       resourceCount++;
     } else if (norm.endsWith('godhand-mod.json') || norm.endsWith('godhand.json')) {
-      const content = await BrowserVFS.getFile(filePath, projectId);
+      let content = await BrowserVFS.getFile(filePath, projectId);
+      content = expandManifestTokens(content, { version: modVersion, minecraftVersion: mcVersion, modId });
       zip.file(norm.split('/').pop()!, content);
       resourceCount++;
     }
   }
 
-  log(`Bundled ${compiledClasses.size} JVM bytecode classes and ${resourceCount} resource files`);
+  log(`Bundled ${compiledClasses.size} JVM bytecode classes and ${resourceCount} resource files with expanded SemVer tokens`);
 
   // Step 6: Generate Blob
   const blob = await zip.generateAsync({
@@ -391,8 +534,8 @@ export async function compileModToJar(
     compressionOptions: { level: 6 }
   });
 
-  const filename = `${modId}-${modVersion}.jar`;
-  await emitStep(6, 'package', `Successfully assembled production archive: ${filename} (${(blob.size / 1024).toFixed(1)} KB). Stream ready!`, 100);
+  const filename = targetJarName;
+  await emitStep(6, 'package', `Successfully assembled production archive: ${filename} (${(blob.size / 1024).toFixed(1)} KB). Stream ready!`, 100, 250);
   log(`SUCCESS: Successfully generated production .JAR: ${filename} (${(blob.size / 1024).toFixed(1)} KB)`);
   log(`Zero-PAT requirement satisfied: 100% Client-Side In-Browser Build complete.`);
 

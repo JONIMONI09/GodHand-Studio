@@ -23,9 +23,10 @@ import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { useActivity } from './context/ActivityContext';
 import { diagnoseJava, applyJavaFix, DiagnosticItem } from './lib/diagnostics';
 import { compileModToJar, downloadBlob } from './lib/jarCompiler';
-import { isVFSMode } from './lib/api';
+import { BrowserVFS } from './lib/vfs';
+import { isVFSMode, probeBackendStatus } from './lib/api';
 import { PipelineStep, RunErrorDetail, RunArtifact } from './components/ide/IDERunProgressView';
-import { CiSession, subscribeCiSession, pollCiSession } from './lib/ciSession';
+import { CiSession, subscribeCiSession, pollCiSession, createCiSession, saveCiSession, resolveReleaseDownloadUrl } from './lib/ciSession';
 
 import ModDetails from './pages/ModDetails';
 import { IDEHeader } from './components/ide/IDEHeader';
@@ -119,8 +120,10 @@ function IDE() {
           setRunStatus('success');
           setRunProgress(100);
           setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+          const cleanName = (sess.targetMod || 'godhand').replace(/^mods[\/\\]/, '').replace(/[\\\/]/g, '');
+          const jarFilename = cleanName.includes('arm32') ? 'arm32-fix-1.0.0.jar' : `${cleanName}-1.0.0.jar`;
           setRunArtifact({
-            filename: `${sess.targetMod}-1.0.0.jar`,
+            filename: jarFilename,
             downloadUrl: sess.artifactDownloadUrl
           });
           setBuildLogs(prev => [
@@ -457,10 +460,95 @@ function IDE() {
     setPipelineSteps(initialSteps);
     
     try {
-      if (isVFSMode()) {
+      // 1. Probe backend status first to verify if native compiler terminal is available
+      setBuildLogs(prev => [...prev, '[Environment Check] Probing compiler backend...']);
+      const backendAlive = await probeBackendStatus();
+
+      if (!backendAlive || isVFSMode()) {
         const targetProj = isCoreMod && coreModId ? coreModId : (projectId || 'godhand');
         setRunType('browser-compile');
-        setBuildLogs([`[Client-Compiler] Initializing Zero-PAT In-Browser compilation for ${targetProj}...`]);
+        setBuildLogs(prev => [
+          ...prev,
+          '[Environment Check] No local terminal/backend detected (standalone mode). Switching to GitHub CI & In-Browser Compiler...',
+          `[Client-Compiler] Initializing Zero-PAT In-Browser compilation for ${targetProj}...`
+        ]);
+
+        // 2. Comprehensive Pre-flight Syntax & Typo Check across all Java files in project
+        let allSyntaxErrors: Array<{ file: string; line: number; message: string; suggestedFix?: string; typo?: string }> = [];
+        try {
+          await BrowserVFS.ensureInitialized(targetProj);
+          const tree = await BrowserVFS.getTree(targetProj);
+          const javaFiles: string[] = [];
+          const collectJava = (nodes: any[]) => {
+            for (const n of nodes) {
+              if (n.type === 'file' && typeof n.path === 'string' && n.path.endsWith('.java')) {
+                javaFiles.push(n.path);
+              }
+              if (n.children && Array.isArray(n.children)) {
+                collectJava(n.children);
+              }
+            }
+          };
+          collectJava(tree);
+
+          for (const jFile of javaFiles) {
+            const jCode = (activeFile === jFile) ? code : await BrowserVFS.getFile(jFile, targetProj);
+            const diags = diagnoseJava(jCode);
+            for (const d of diags) {
+              if (d.severity === 'error' || d.type === 'typo' || d.type === 'syntax') {
+                allSyntaxErrors.push({
+                  file: jFile,
+                  line: d.line,
+                  message: d.message,
+                  suggestedFix: d.suggestedFix,
+                  typo: d.typo
+                });
+              }
+            }
+          }
+        } catch (_) {
+          if (activeFile && activeFile.endsWith('.java')) {
+            const diags = diagnoseJava(code);
+            allSyntaxErrors = diags
+              .filter(d => d.severity === 'error' || d.type === 'typo' || d.type === 'syntax')
+              .map(d => ({ file: activeFile, line: d.line, message: d.message, suggestedFix: d.suggestedFix, typo: d.typo }));
+          }
+        }
+
+        if (allSyntaxErrors.length > 0) {
+          const firstErr = allSyntaxErrors[0];
+          setRunStatus('failed');
+          setRunErrorDetails({
+            title: language === 'de' ? 'Java-Syntaxfehler / Tippfehler erkannt' : 'Java Syntax Error / Typo Detected',
+            message: firstErr.message,
+            file: firstErr.file,
+            line: firstErr.line,
+            suggestedFix: firstErr.suggestedFix,
+            typo: firstErr.typo
+          });
+          setPipelineSteps(prev => prev.map((s, idx) => idx === 2 ? { ...s, status: 'failed' } : s));
+          setBuildLogs(prev => [
+            ...prev,
+            `[Syntax Check] Java syntax check failed with ${allSyntaxErrors.length} error(s):`,
+            ...allSyntaxErrors.map(e => `  -> [${e.file}:${e.line}] ${e.message}${e.suggestedFix ? ` (Fix: ${e.suggestedFix})` : ''}`),
+            `[ERROR] Build aborted due to syntax errors. Please fix before building.`
+          ]);
+          toast.error(language === 'de' ? 'Kompilierung abgebrochen: Syntaxfehler gefunden!' : 'Build aborted: Syntax errors found!');
+          setIsBuilding(false);
+          return;
+        } else {
+          setBuildLogs(prev => [...prev, `[Syntax Check] Java AST syntax check passed (0 errors across workspace).`]);
+        }
+
+        // 3. Initialize & sync CI session without opening external GitHub tabs
+        const activeCiSession = createCiSession(targetProj);
+        setCiSession(activeCiSession);
+        setBuildLogs(prev => [
+          ...prev,
+          `[GitHub CI Session] Initialized session ${activeCiSession.id} (Zero-PAT mode, website-driven).`,
+          `[Client-Compiler] Launching Zero-PAT In-Browser compilation pipeline for ${targetProj}...`
+        ]);
+
         const res = await compileModToJar(
           targetProj,
           (msg) => {
@@ -492,10 +580,24 @@ function IDE() {
           };
           setRunArtifact(artifact);
           downloadBlob(res.blob, res.filename);
-          setBuildLogs(prev => [...prev, `[SUCCESS] Compiled ${res.filename} (${(res.blob!.size / 1024).toFixed(1)} KB)`]);
+          setBuildLogs(prev => [
+            ...prev,
+            `[SUCCESS] Compiled ${res.filename} (${(res.blob!.size / 1024).toFixed(1)} KB)`,
+            `[Zero-Token Delivery] Production JAR ready for download directly in browser.`
+          ]);
+          // Sync CI session state
+          activeCiSession.status = 'success';
+          activeCiSession.artifactDownloadUrl = resolveReleaseDownloadUrl(targetProj, '1.0.0');
+          activeCiSession.logs.push(`[Client-Build] Successfully compiled ${res.filename} in-browser (Zero-PAT)`);
+          saveCiSession(activeCiSession);
+          setCiSession({ ...activeCiSession });
           toast.success(language === 'de' ? `Kompilierung erfolgreich: ${res.filename} heruntergeladen!` : `Build successful: Downloaded ${res.filename}!`);
         } else {
           setRunStatus('failed');
+          activeCiSession.status = 'failed';
+          activeCiSession.message = language === 'de' ? 'Kompilierung fehlgeschlagen' : 'Build failed';
+          saveCiSession(activeCiSession);
+          setCiSession({ ...activeCiSession });
           const javaDiags = diagnoseJava(code);
           const typoDiag = javaDiags.find(d => d.type === 'typo' || d.suggestedFix);
           const firstError = res.diagnostics.find(d => d.severity === 'error') || res.diagnostics[0];
@@ -515,7 +617,8 @@ function IDE() {
               message: firstError.message,
               file: firstError.file,
               line: firstError.line,
-              suggestedFix: firstError.message.includes(';') ? 'Add missing semicolon' : undefined
+              suggestedFix: firstError.suggestedFix || (firstError.message.includes(';') ? 'Add missing semicolon' : undefined),
+              typo: firstError.typo
             });
           } else {
             setRunErrorDetails({

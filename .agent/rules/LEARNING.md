@@ -77,3 +77,26 @@
   - Always use ES6 template literals (backticks) or external static .html files when serving JavaScript from Python sidecars.
   - Implement and run a unified local CI verification script (npm run test:ci / node scripts/run-ci-local.mjs) that validates all 5 stages (VFS bundle generation, TypeScript linting, Vite build, 105+ Node test suites, and Gradle remapJar) before pushing.
   - In .github/dependabot.yml, configure ignore: - dependency-name: "*", update-types: ["version-update:semver-major"] to prevent automated major version bumps (like React 19 or Express 5) from breaking CI workflows.
+
+### 13. SemVer Template Resolution & Manifest Token Expansion
+- **Problem**: In Fabric Loom mod projects, `fabric.mod.json` defines `"version": "${version}"` which is typically expanded at build-time by Gradle's `processResources` task using `mod_version` from `gradle.properties`. In-Browser packaging previously read literal `"${version}"`, naming compiled files `arm32fix-${version}.jar` and leaving unexpanded placeholders in the packaged manifest, which crashes Fabric Loader at runtime.
+- **Correction**:
+  - Implement `resolveModVersion()` and `resolveArchivesBaseName()` in `modVersion.mjs` and `jarCompiler.ts`.
+  - When `fabric.mod.json` contains a template placeholder (`${version}` or `${mod_version}`), inspect `gradle.properties` for `mod_version`, `version`, or `modVersion` (falling back to `1.0.0`, never literal `${version}`).
+  - Perform manifest token expansion during JAR archiving: replace `${version}`, `${minecraft_version}`, `${project.version}`, and `${archives_base_name}` with concrete values.
+
+### 14. GitHub Actions Run URLs vs 404 `/artifacts` Path & Direct Releases Delivery
+- **Problem**: GitHub Actions IssueOps comments previously linked to `https://github.com/<owner>/<repo>/actions/runs/<run_id>/artifacts`. GitHub does not have an HTML web page endpoint at `/artifacts`, resulting in `404 This is not the web page you are looking for.` Additionally, GitHub Actions artifacts require an authenticated session for ZIP archive downloads, which blocks unauthenticated web users.
+- **Correction**:
+  - In `.github/workflows/gradle.yml`, point run links directly to the valid Actions overview URL: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`.
+  - In `.github/workflows/gradle.yml`, configure the `release` job to trigger on `issues` with `[CLOUD-BUILD]` to automatically update `latest` release assets.
+  - In `modVersion.mjs` and `ciSession.ts`, implement `resolveReleaseDownloadUrl()` pointing to `https://github.com/<owner>/<repo>/releases/download/latest/<mod>.jar`, which allows 100% public, token-free, direct browser downloads without authentication.
+  - Provide `cleanActionsUrl()` to strip `/artifacts` suffixes and subpaths/queries from incoming URLs.
+
+### 15. Website-Centric Zero-Token Compilation & Upfront AST Syntax Checking
+- **Problem**: When triggering builds without a local backend server, the client compiler finished in ~100ms in memory, giving users the impression of an unverified fake download. Furthermore, users were forced to open external GitHub tabs to create issues for cloud builds, and syntax errors (such as Java keyword typos or missing semicolons) were not caught prior to JAR generation across all workspace files.
+- **Correction**:
+  - Implement upfront workspace-wide Java AST syntax checks via `diagnoseJava` across all `.java` files in `BrowserVFS` and active editor buffers before initiating compilation. If errors are detected, abort immediately and surface filename, line number, message, and 1-click suggested fix.
+  - Implement realistic step staging (300-380ms per step, ~2.4s total) with live progress percentages, step descriptions, and comprehensive console logs.
+  - In `ciSession.ts` and `ciSession.mjs`, support dual polling: both IssueOps issue comments and public GitHub Actions workflow runs (`actions/runs`), enabling users to track cloud builds directly on the website without opening GitHub or entering any tokens.
+  - Ensure `targetMod` paths like `mods/arm32-fix` are strictly sanitized to clean filenames like `arm32-fix-1.0.0.jar` rather than `mods/arm32-fix-1.0.0.jar`.

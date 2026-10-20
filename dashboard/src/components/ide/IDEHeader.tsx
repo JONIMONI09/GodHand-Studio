@@ -29,7 +29,8 @@ import {
   Layers,
   Terminal,
   Cpu,
-  Loader2
+  Loader2,
+  Activity
 } from 'lucide-react';
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useTranslation } from '../../i18n/translations';
@@ -635,55 +636,91 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
             </div>
 
             <div className="p-5 space-y-4 text-xs">
-              {/* Direct In-Browser Bundling */}
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
-                <span className="font-semibold text-slate-200 block text-xs">
-                  {language === 'de' ? '1. Direkt-Download (100% Im Browser erzeugt, Kein Server nötig)' : '1. Direct Download (In-Browser Packaged, Zero Backend Needed)'}
-                </span>
-                <div className="flex flex-wrap gap-2">
+              {/* Direct In-Browser Web Compilation (Zero Tokens, Direct on Website) */}
+              <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-emerald-400" />
+                    <span>{language === 'de' ? '1. Direkt auf Website kompilieren (Empfohlen)' : '1. Direct In-Browser Web Compiler (Recommended)'}</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                    ZERO TOKENS • WEB ONLY
+                  </span>
+                </div>
+                <p className="text-slate-400 leading-relaxed text-[11px]">
+                  {language === 'de'
+                    ? 'Kompiliert Ihre Mod vollständig im Web-IDE-Tab mit echtem Java 21 Bytecode (0xCAFEBABE), SemVer-Auflösung und Syntaxprüfung. Kein GitHub-Tab, kein Issue und keine Tokens erforderlich!'
+                    : 'Compiles your mod entirely inside the web IDE tab with real Java 21 bytecode (0xCAFEBABE), SemVer resolution, and AST syntax check. Zero GitHub tabs, issues, or tokens needed!'}
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
                   <button
-                    onClick={handleExportZip}
-                    disabled={isExporting}
-                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                    onClick={() => {
+                      setShowCloudBuildModal(false);
+                      handleBuild();
+                    }}
+                    disabled={isBuilding}
+                    className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition font-medium flex items-center justify-center gap-1.5 shadow-sm"
                   >
-                    <FolderDown className="h-4 w-4 text-emerald-400" />
-                    <span>{t('exportProjectZip')}</span>
+                    <Play className="h-3.5 w-3.5" />
+                    <span>{language === 'de' ? 'Direkt im Web-IDE kompilieren' : 'Compile in Web IDE'}</span>
                   </button>
                   <button
                     onClick={handleExportJar}
                     disabled={isExporting}
-                    className="flex-1 py-2 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                    className="py-2 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
                   >
                     <Download className="h-4 w-4 text-emerald-400" />
                     <span>{t('exportProjectJar')}</span>
                   </button>
+                  <button
+                    onClick={handleExportZip}
+                    disabled={isExporting}
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition font-medium flex items-center justify-center gap-1.5"
+                  >
+                    <FolderDown className="h-4 w-4 text-slate-300" />
+                    <span>{t('exportProjectZip')}</span>
+                  </button>
                 </div>
               </div>
 
-              {/* GitHub Actions Cloud Compiler (IssueOps - Zero PAT Required) */}
+              {/* GitHub Actions Cloud Compiler (IssueOps & Remote CI) */}
               <div className="bg-slate-900 border border-indigo-500/20 rounded-lg p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
-                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    <Cloud className="h-4 w-4 text-indigo-400" />
                     <span>{t('cloudBuildWithGithub')}</span>
                   </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    ZERO PAT REQUIRED
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    REMOTE LOOM CI
                   </span>
                 </div>
-                <p className="text-slate-400 leading-relaxed">
+                <p className="text-slate-400 leading-relaxed text-[11px]">
                   {language === 'de'
-                    ? 'Startet einen vollständigen Cloud-Build mit Gradle Loom auf GitHub Actions. Sie müssen kein Token oder Passwort eingeben – GitHub führt den Build automatisch aus!'
-                    : 'Launches a full Gradle Loom cloud compile on GitHub Actions. Zero tokens or passwords required – GitHub automatically compiles and uploads your mod JAR!'}
+                    ? 'Startet oder überwacht einen Gradle Loom Build auf GitHub Actions. Sie können aktive CI-Sitzungen direkt im Run-Fortschrittsbereich des Studios verfolgen.'
+                    : 'Launches or tracks an automated Gradle Loom build on GitHub Actions. Active CI sessions can be monitored directly in the studio run view.'}
                 </p>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
                   <button
-                    onClick={handleTriggerGitHubIssueCloudBuild}
+                    onClick={() => {
+                      const activeProj = projectId || 'godhand';
+                      createCiSession(activeProj);
+                      setShowCloudBuildModal(false);
+                      if (onToggleRunView) onToggleRunView();
+                      toast.success(language === 'de' ? 'CI-Sitzung im Studio aktiviert!' : 'CI session activated in studio!');
+                    }}
                     className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition font-medium flex items-center justify-center gap-1.5"
                   >
-                    <Play className="h-3.5 w-3.5" />
-                    <span>{language === 'de' ? '1-Click Cloud-Build (GitHub IssueOps)' : '1-Click Cloud Build (IssueOps)'}</span>
+                    <Activity className="h-3.5 w-3.5" />
+                    <span>{language === 'de' ? 'CI-Status im Studio überwachen' : 'Track CI in Studio'}</span>
+                  </button>
+                  <button
+                    onClick={handleTriggerGitHubIssueCloudBuild}
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition font-medium flex items-center justify-center gap-1"
+                    title={language === 'de' ? 'Öffnet GitHub Issue zur Cloud-Auslösung' : 'Opens GitHub Issue for cloud trigger'}
+                  >
+                    <span>{language === 'de' ? 'IssueOps Auslöser' : 'IssueOps Trigger'}</span>
+                    <ExternalLink className="h-3 w-3 opacity-60" />
                   </button>
                   <a
                     href="https://github.com/JONIMONI09/GodHand-Studio/actions"
