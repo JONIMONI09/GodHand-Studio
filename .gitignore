@@ -48,6 +48,7 @@ docs/archive/
 .codegraph/*
 !.codegraph/.gitignore
 .fallow/
+.agents/
 *.bin
 fallow-report.md
 vibeworks-check.json

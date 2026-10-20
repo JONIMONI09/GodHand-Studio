@@ -254,21 +254,35 @@ async function handleVfsFallback(normalizedPath: string, options: RequestInit = 
     }
     if (method === 'POST') {
       const { path: filePath, content } = body;
-      await BrowserVFS.saveFile(filePath, content || '', proj);
-      return jsonResponse({ success: true, message: 'File saved successfully' });
+      try {
+        await BrowserVFS.saveFile(filePath, content || '', proj);
+        return jsonResponse({ success: true, message: 'File saved successfully' });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || 'Failed to save file' }, 400);
+      }
     }
     if (method === 'DELETE') {
       const filePath = query.get('path') || body.path || '';
-      await BrowserVFS.deleteFile(filePath, proj);
-      return jsonResponse({ success: true, message: 'File deleted successfully' });
+      try {
+        await BrowserVFS.deleteFile(filePath, proj);
+        return jsonResponse({ success: true, message: 'File deleted successfully' });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || 'Failed to delete file' }, 400);
+      }
     }
   }
 
-  if (pathname === '/api/fs/move' && method === 'POST') {
-    const { sourcePath, destinationPath, projectId, project } = body;
+  if ((pathname === '/api/fs/move' || pathname === '/api/fs/rename') && method === 'POST') {
+    const { sourcePath, destinationPath, oldPath, newPath, projectId, project } = body;
+    const src = sourcePath || oldPath;
+    const dst = destinationPath || newPath;
     const proj = projectId || project || query.get('project') || 'godhand';
-    await BrowserVFS.moveFile(sourcePath, destinationPath, proj);
-    return jsonResponse({ success: true, message: 'Moved successfully' });
+    try {
+      await BrowserVFS.rename(src, dst, proj);
+      return jsonResponse({ success: true, message: 'Moved/Renamed successfully' });
+    } catch (e: any) {
+      return jsonResponse({ error: e.message || 'Failed to rename' }, 400);
+    }
   }
 
   if (pathname === '/api/fs/folders') {
@@ -302,12 +316,18 @@ async function handleVfsFallback(normalizedPath: string, options: RequestInit = 
     return jsonResponse({ folders });
   }
 
-  const systemModMoveMatch = pathname.match(/^\/api\/system-mods\/([^/]+)\/move$/);
+  const systemModMoveMatch = pathname.match(/^\/api\/system-mods\/([^/]+)\/(?:move|rename)$/);
   if (systemModMoveMatch && method === 'POST') {
     const modId = systemModMoveMatch[1];
-    const { sourcePath, destinationPath } = body;
-    await BrowserVFS.moveFile(sourcePath, destinationPath, modId);
-    return jsonResponse({ success: true, message: 'Moved successfully' });
+    const { sourcePath, destinationPath, oldPath, newPath } = body;
+    const src = sourcePath || oldPath;
+    const dst = destinationPath || newPath;
+    try {
+      await BrowserVFS.rename(src, dst, modId);
+      return jsonResponse({ success: true, message: 'Moved/Renamed successfully' });
+    } catch (e: any) {
+      return jsonResponse({ error: e.message || 'Failed to rename' }, 400);
+    }
   }
 
   const systemModBuildMatch = pathname.match(/^\/api\/system-mods\/([^/]+)\/build$/);
@@ -333,13 +353,21 @@ async function handleVfsFallback(normalizedPath: string, options: RequestInit = 
     }
     if (method === 'POST') {
       const { path: filePath, content } = body;
-      await BrowserVFS.saveFile(filePath, content || '', modId);
-      return jsonResponse({ success: true, message: 'File saved successfully' });
+      try {
+        await BrowserVFS.saveFile(filePath, content || '', modId);
+        return jsonResponse({ success: true, message: 'File saved successfully' });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || 'Failed to save file' }, 400);
+      }
     }
     if (method === 'DELETE') {
       const filePath = query.get('path') || body.path || '';
-      await BrowserVFS.deleteFile(filePath, modId);
-      return jsonResponse({ success: true, message: 'File deleted successfully' });
+      try {
+        await BrowserVFS.deleteFile(filePath, modId);
+        return jsonResponse({ success: true, message: 'File deleted successfully' });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || 'Failed to delete file' }, 400);
+      }
     }
   }
 

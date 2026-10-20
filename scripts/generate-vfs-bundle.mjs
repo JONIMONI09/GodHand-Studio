@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isBinaryAssetPath, getBinaryAssetMime } from '../dashboard/lib/runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,8 +47,14 @@ function scanDirectory(dir, baseDir = dir) {
         continue;
       }
       try {
-        const content = fs.readFileSync(fullPath, 'utf8');
-        result[relPath] = content;
+        if (isBinaryAssetPath(entry.name)) {
+          const buffer = fs.readFileSync(fullPath);
+          const mime = getBinaryAssetMime(entry.name);
+          result[relPath] = `data:${mime};base64,${buffer.toString('base64')}`;
+        } else {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          result[relPath] = content;
+        }
       } catch (err) {
         console.warn(`[VFS-Bundle] Warning: Skipped ${relPath}: ${err.message}`);
       }

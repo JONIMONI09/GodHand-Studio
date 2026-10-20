@@ -217,5 +217,75 @@ describe('In-Browser Virtual File System (VFS) & Hybrid Cloud Bridge Suite', () 
     assert.ok(!appCode.includes('<LocalhostBanner />'), 'Must not render top LocalhostBanner overlay');
     assert.ok(!appCode.includes('<SDKDownloadModal />'), 'Must not render fake SDKDownloadModal popup');
   });
+
+  it('verifies binary assets (icon.png) preserve raw byte integrity in vfs-bundle.json and disk', () => {
+    const diskIconPath = path.resolve(rootDir, 'godhand/src/main/resources/assets/godhand/icon.png');
+    assert.ok(fs.existsSync(diskIconPath), 'godhand/src/main/resources/assets/godhand/icon.png must exist');
+    const diskBytes = fs.readFileSync(diskIconPath);
+    const pngMagic = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    for (let i = 0; i < pngMagic.length; i++) {
+      assert.strictEqual(diskBytes[i], pngMagic[i], `Byte at offset ${i} must match PNG header`);
+    }
+
+    const bundlePath = path.resolve(rootDir, 'dashboard/public/vfs-bundle.json');
+    assert.ok(fs.existsSync(bundlePath), 'vfs-bundle.json must exist');
+    const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+    const bundledIcon = bundle.projects?.godhand?.['src/main/resources/assets/godhand/icon.png'];
+    assert.ok(bundledIcon, 'icon.png must be present in bundled godhand project');
+    assert.ok(bundledIcon.startsWith('data:image/png;base64,'), 'Binary asset must be stored as base64 data URL');
+
+    const base64Part = bundledIcon.replace(/^data:image\/png;base64,/, '');
+    const decodedBuf = Buffer.from(base64Part, 'base64');
+    for (let i = 0; i < pngMagic.length; i++) {
+      assert.strictEqual(decodedBuf[i], pngMagic[i], `Decoded bundled byte at offset ${i} must match PNG header`);
+    }
+  });
+
+  it('verifies jarCompiler and vfs.ts support binary payload detection and raw byte packaging', () => {
+    const vfsCode = fs.readFileSync(vfsPath, 'utf8');
+    assert.ok(vfsCode.includes('isBinaryAssetPath'), 'vfs.ts must export isBinaryAssetPath');
+    assert.ok(vfsCode.includes('decodeBase64ToUint8Array'), 'vfs.ts must export decodeBase64ToUint8Array');
+    assert.ok(vfsCode.includes('toBinaryPayload'), 'vfs.ts must export toBinaryPayload');
+
+    const compilerPath = path.resolve(rootDir, 'dashboard/src/lib/jarCompiler.ts');
+    const compilerCode = fs.readFileSync(compilerPath, 'utf8');
+    assert.ok(compilerCode.includes('isBinaryAssetPath'), 'jarCompiler.ts must import isBinaryAssetPath');
+    assert.ok(compilerCode.includes('toBinaryPayload'), 'jarCompiler.ts must use toBinaryPayload for binary assets');
+    assert.ok(compilerCode.includes('{ binary: true }'), 'jarCompiler.ts must mark raw binary assets in zip');
+  });
+
+  it('verifies IDEEditorArea implements dedicated texture preview with pixelated rendering and tabs', () => {
+    const editorPath = path.resolve(rootDir, 'dashboard/src/components/ide/IDEEditorArea.tsx');
+    assert.ok(fs.existsSync(editorPath), 'IDEEditorArea.tsx must exist');
+    const editorCode = fs.readFileSync(editorPath, 'utf8');
+
+    assert.ok(editorCode.includes('openTabs'), 'IDEEditorArea must accept openTabs prop');
+    assert.ok(editorCode.includes('imageRendering'), 'IDEEditorArea must support pixelated image rendering');
+    assert.ok(editorCode.includes('isImageFile'), 'IDEEditorArea must detect image texture files');
+    assert.ok(editorCode.includes('imageError'), 'IDEEditorArea must track imageError state');
+    assert.ok(editorCode.includes('setImgNaturalSize(null)'), 'IDEEditorArea must reset natural size on file change');
+  });
+
+  it('verifies IDEFileExplorer implements inline renaming with Windows reserved name validation', () => {
+    const explorerPath = path.resolve(rootDir, 'dashboard/src/components/ide/IDEFileExplorer.tsx');
+    assert.ok(fs.existsSync(explorerPath), 'IDEFileExplorer.tsx must exist');
+    const explorerCode = fs.readFileSync(explorerPath, 'utf8');
+
+    assert.ok(explorerCode.includes('onRenameNode'), 'IDEFileExplorer must accept onRenameNode prop');
+    assert.ok(explorerCode.includes('validateFileName'), 'IDEFileExplorer must validate names with validateFileName');
+    assert.ok(explorerCode.includes('setRenamingPath'), 'IDEFileExplorer must maintain renaming state');
+  });
+
+  it('verifies BrowserVFS and api.ts implement robust error handling and collision protection', () => {
+    const vfsCode = fs.readFileSync(vfsPath, 'utf8');
+    assert.ok(vfsCode.includes('Access denied: cannot delete workspace root'), 'vfs.ts must protect workspace root from deletion');
+    assert.ok(vfsCode.includes('Destination already exists'), 'vfs.ts rename must guard against overwriting existing destinations');
+
+    const apiPath = path.resolve(rootDir, 'dashboard/src/lib/api.ts');
+    const apiCode = fs.readFileSync(apiPath, 'utf8');
+    assert.ok(apiCode.includes("jsonResponse({ error: e.message || 'Failed to rename' }, 400)"), 'api.ts must return 400 on VFS rename errors');
+    assert.ok(apiCode.includes("jsonResponse({ error: e.message || 'Failed to save file' }, 400)"), 'api.ts must return 400 on VFS save errors');
+  });
 });
+
 

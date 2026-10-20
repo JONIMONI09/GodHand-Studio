@@ -24,7 +24,7 @@ import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { useActivity } from './context/ActivityContext';
 import { diagnoseJava, applyJavaFix, DiagnosticItem } from './lib/diagnostics';
 import { compileModToJar, downloadBlob } from './lib/jarCompiler';
-import { BrowserVFS } from './lib/vfs';
+import { BrowserVFS, validateFileName, validatePath } from './lib/vfs';
 import { isVFSMode, probeBackendStatus } from './lib/api';
 import { PipelineStep, RunErrorDetail, RunArtifact } from './components/ide/IDERunProgressView';
 import { CiSession, subscribeCiSession, pollCiSession, createCiSession, saveCiSession, resolveReleaseDownloadUrl } from './lib/ciSession';
@@ -38,6 +38,15 @@ import { IDETaskStatusBar } from './components/ide/IDETaskStatusBar';
 
 function IDE() {
   const { projectId } = useParams();
+  const isCoreMod = Boolean(projectId && (
+    projectId.startsWith('core-') || 
+    projectId.startsWith('core:') || 
+    projectId.startsWith('system-core-') || 
+    projectId === 'arm32-fix'
+  ));
+  const coreModId = isCoreMod 
+    ? (projectId === 'arm32-fix' ? 'arm32-fix' : projectId!.replace(/^(core-|core:|system-core-)/, '')) 
+    : null;
   const navigate = useNavigate();
   const { user, username, role, isStaff, isOwner } = useAuth();
   const { t, language, setLanguage } = useTranslation();
@@ -45,6 +54,7 @@ function IDE() {
   const [nodeToDelete, setNodeToDelete] = React.useState<{ path: string; name: string; type: 'file' | 'folder' } | null>(null);
   const [isDeletingNode, setIsDeletingNode] = React.useState(false);
   const [activeFile, setActiveFile] = React.useState('src/main/java/com/yourcompany/godhand/GodHand.java');
+  const [openTabs, setOpenTabs] = React.useState<string[]>(['src/main/java/com/yourcompany/godhand/GodHand.java']);
   const [fileTree, setFileTree] = React.useState<any[]>([]);
   const [code, setCode] = React.useState('// Loading code...');
   const [isBuilding, setIsBuilding] = React.useState(false);
@@ -326,12 +336,11 @@ function IDE() {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         handleSave();
-        toast.success(language === 'de' ? 'Gespeichert!' : 'Saved!');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeFile, code, language]);
+  }, [activeFile, code, language, isCoreMod, coreModId]);
 
   React.useEffect(() => {
     if (projectId && user) {
@@ -378,18 +387,6 @@ function IDE() {
       </div>
     );
   }
-
-
-  
-  const isCoreMod = Boolean(projectId && (
-    projectId.startsWith('core-') || 
-    projectId.startsWith('core:') || 
-    projectId.startsWith('system-core-') || 
-    projectId === 'arm32-fix'
-  ));
-  const coreModId = isCoreMod 
-    ? (projectId === 'arm32-fix' ? 'arm32-fix' : projectId!.replace(/^(core-|core:|system-core-)/, '')) 
-    : null;
 
   const refreshFileTree = async () => {
     try {
@@ -738,16 +735,24 @@ function IDE() {
   };
 
   const handleSave = async () => {
+    if (!activeFile) {
+      toast.error(language === 'de' ? 'Keine Datei zum Speichern ausgewählt' : 'No file open to save');
+      return;
+    }
     setIsSaving(true);
     try {
       const url = isCoreMod && coreModId
         ? `/api/system-mods/${coreModId}/file`
         : '/api/fs/file';
-      await fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: activeFile, content: code })
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || (language === 'de' ? 'Speichern fehlgeschlagen' : 'Save failed'));
+      }
       toast.success(language === 'de' ? 'Erfolgreich gespeichert' : 'Saved successfully');
     } catch (err: any) {
       console.error(err);
@@ -811,28 +816,39 @@ function IDE() {
   const [newFileName, setNewFileName] = React.useState('');
 
   const handleCreateFile = async (folderPath: string) => {
-    if (!newFileName.trim()) {
+    const val = validateFileName(newFileName);
+    if (!val.valid) {
+      toast.error(val.error || (language === 'de' ? 'Ungültiger Dateiname' : 'Invalid filename'));
+      return;
+    }
+    const trimmed = newFileName.trim();
+    if (!trimmed) {
       setCreatingFileIn(null);
       return;
     }
-    const fullPath = folderPath ? `${folderPath}/${newFileName}` : newFileName;
+    const fullPath = folderPath ? `${folderPath}/${trimmed}` : trimmed;
     try {
       const url = isCoreMod && coreModId
         ? `/api/system-mods/${coreModId}/file`
         : '/api/fs/file';
-      await fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: fullPath, content: '// Neuer Inhalt' })
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || (language === 'de' ? 'Datei konnte nicht erstellt werden' : 'Failed to create file'));
+      }
       // Refresh tree
       await refreshFileTree();
       setCreatingFileIn(null);
       setNewFileName('');
       setActiveFile(fullPath);
-    } catch (e) {
+      setOpenTabs(prev => prev.includes(fullPath) ? prev : [...prev, fullPath]);
+    } catch (e: any) {
       console.error(e);
-      toast.error('Error creating the file.');
+      toast.error(e.message || 'Error creating the file.');
     }
   };
 
@@ -896,6 +912,13 @@ function IDE() {
         return;
       }
 
+      // Cascade update open tabs
+      setOpenTabs(prev => prev.map(p => {
+        if (p === moveTargetNode.path) return destinationPath;
+        if (p.startsWith(moveTargetNode.path + '/')) return destinationPath + p.substring(moveTargetNode.path.length);
+        return p;
+      }));
+
       if (activeFile === moveTargetNode.path) {
         setActiveFile(destinationPath);
       } else if (activeFile.startsWith(moveTargetNode.path + '/')) {
@@ -938,6 +961,13 @@ function IDE() {
         return;
       }
 
+      // Cascade update open tabs
+      setOpenTabs(prev => prev.map(p => {
+        if (p === node.path) return destinationPath;
+        if (p.startsWith(node.path + '/')) return destinationPath + p.substring(node.path.length);
+        return p;
+      }));
+
       if (activeFile === node.path) {
         setActiveFile(destinationPath);
       } else if (activeFile.startsWith(node.path + '/')) {
@@ -953,6 +983,66 @@ function IDE() {
       toast.success(t('movedSuccessfully', { name: fileName }));
     } catch (err: any) {
       toast.error(err.message || t('failedToMove'));
+    }
+  };
+
+  const handleCloseTab = (pathToClose: string) => {
+    setOpenTabs(prev => {
+      const next = prev.filter(p => p !== pathToClose);
+      if (activeFile === pathToClose) {
+        if (next.length > 0) {
+          setActiveFile(next[next.length - 1]);
+        } else {
+          setActiveFile('');
+          setCode('// Select a file to view and edit');
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleRenameNode = async (oldPath: string, newPath: string, isFolder: boolean) => {
+    const val = validatePath(newPath);
+    if (!val.valid) {
+      toast.error(val.error || 'Ungültiger Pfad');
+      return;
+    }
+    try {
+      if (isBackendOffline) {
+        await BrowserVFS.rename(oldPath, newPath, coreModId || 'godhand');
+      } else {
+        const moveUrl = isCoreMod && coreModId
+          ? `/api/system-mods/${coreModId}/move`
+          : '/api/fs/move';
+        const res = await fetch(moveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourcePath: oldPath, destinationPath: newPath, projectId: coreModId || 'godhand' })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to rename');
+        }
+      }
+
+      // Cascade update open tabs
+      setOpenTabs(prev => prev.map(p => {
+        if (p === oldPath) return newPath;
+        if (p.startsWith(oldPath + '/')) return newPath + p.substring(oldPath.length);
+        return p;
+      }));
+
+      // Update activeFile if it was renamed or inside renamed folder
+      if (activeFile === oldPath) {
+        setActiveFile(newPath);
+      } else if (activeFile.startsWith(oldPath + '/')) {
+        setActiveFile(newPath + activeFile.substring(oldPath.length));
+      }
+
+      await refreshFileTree();
+      toast.success(t('renamedSuccess') || 'Renamed successfully!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to rename');
     }
   };
 
@@ -995,10 +1085,20 @@ function IDE() {
       }
 
       updateProgress(90, language === 'de' ? 'Bereinige aktiven Editor-Puffer...' : 'Cleaning active editor buffer...');
-      if (activeFile === nodeToDelete.path || activeFile.startsWith(nodeToDelete.path + '/')) {
-        setActiveFile('');
-        setCode('// Select a file to view and edit');
-      }
+      // Close any open editor tabs pointing to the deleted node or inside the deleted folder
+      const targetDelPath = nodeToDelete.path;
+      setOpenTabs(prev => {
+        const remaining = prev.filter(p => p !== targetDelPath && !p.startsWith(targetDelPath + '/'));
+        if (activeFile === targetDelPath || activeFile.startsWith(targetDelPath + '/')) {
+          if (remaining.length > 0) {
+            setActiveFile(remaining[0]);
+          } else {
+            setActiveFile('');
+            setCode('// Select a file to view and edit');
+          }
+        }
+        return remaining;
+      });
 
       const successMsg = isFolder
         ? (language === 'de' ? `Ordner "${nodeToDelete.name}" und Inhalt erfolgreich gelöscht` : `Folder "${nodeToDelete.name}" and contents deleted`)
@@ -1187,6 +1287,13 @@ function IDE() {
             return;
           }
 
+          // Cascade update open tabs
+          setOpenTabs(prev => prev.map(p => {
+            if (p === sourcePath) return destinationPath;
+            if (p.startsWith(sourcePath + '/')) return destinationPath + p.substring(sourcePath.length);
+            return p;
+          }));
+
           if (activeFile === sourcePath) {
             setActiveFile(destinationPath);
           } else if (activeFile.startsWith(sourcePath + '/')) {
@@ -1273,6 +1380,13 @@ function IDE() {
         return;
       }
 
+      // Cascade update open tabs
+      setOpenTabs(prev => prev.map(p => {
+        if (p === sourcePath) return destinationPath;
+        if (p.startsWith(sourcePath + '/')) return destinationPath + p.substring(sourcePath.length);
+        return p;
+      }));
+
       if (activeFile === sourcePath) {
         setActiveFile(destinationPath);
       } else if (activeFile.startsWith(sourcePath + '/')) {
@@ -1349,7 +1463,10 @@ function IDE() {
           onResetWidth={() => setSidebarWidth(260)}
           fileTree={fileTree}
           activeFile={activeFile}
-          setActiveFile={setActiveFile}
+          setActiveFile={(file) => {
+            setActiveFile(file);
+            if (file) setOpenTabs(prev => prev.includes(file) ? prev : [...prev, file]);
+          }}
           sortMode={sortMode}
           setSortMode={setSortMode}
           showSortMenu={showSortMenu}
@@ -1364,6 +1481,7 @@ function IDE() {
           handleDeleteFile={(path, isFolder) => {
             handleDeleteNode({ path, type: isFolder ? 'folder' : 'file', name: path.split('/').pop() || path });
           }}
+          onRenameNode={handleRenameNode}
           openMoveModal={openMoveModal}
           draggingNode={draggingNode}
           setDraggingNode={setDraggingNode}
@@ -1390,6 +1508,12 @@ function IDE() {
             onToggleSidebar={toggleSidebarCollapse}
             isTerminalCollapsed={isTerminalCollapsed}
             onToggleTerminal={toggleTerminalCollapse}
+            openTabs={openTabs}
+            onSelectTab={(path) => {
+              setActiveFile(path);
+              setOpenTabs(prev => prev.includes(path) ? prev : [...prev, path]);
+            }}
+            onCloseTab={handleCloseTab}
             centerView={centerView}
             onSelectCenterView={setCenterView}
             projectId={isCoreMod && coreModId ? coreModId : (projectId || 'godhand')}
