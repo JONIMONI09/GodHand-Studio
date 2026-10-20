@@ -28,10 +28,7 @@ export const LocalhostBanner: React.FC = () => {
     return null;
   }
 
-  const handleRedirectLocalhost = () => {
-    const currentPath = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = `http://localhost:3000${currentPath}`;
-  };
+
 
   const handleDisconnectTunnel = () => {
     clearCustomBackendUrl();
@@ -84,16 +81,6 @@ export const LocalhostBanner: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-2 shrink-0 ml-2">
-        <button
-          onClick={handleRedirectLocalhost}
-          className="flex items-center gap-1 px-2.5 py-0.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 rounded text-indigo-300 hover:text-white font-medium transition"
-          title="Redirect to http://localhost:3000"
-        >
-          <Server className="h-3 w-3" />
-          <span className="hidden sm:inline">{language === 'de' ? 'Zu Localhost' : 'Switch to Localhost'}</span>
-          <span className="sm:hidden">Localhost</span>
-          <ExternalLink className="h-3 w-3 opacity-60" />
-        </button>
         <button
           onClick={() => setIsDismissed(true)}
           className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition"

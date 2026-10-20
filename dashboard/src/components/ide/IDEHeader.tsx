@@ -28,12 +28,15 @@ import {
   Box,
   Layers,
   Terminal,
-  Cpu
+  Cpu,
+  Loader2
 } from 'lucide-react';
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { useTranslation } from '../../i18n/translations';
 import { BrowserVFS } from '../../lib/vfs';
 import { compileModToJar, downloadBlob } from '../../lib/jarCompiler';
+import { createCiSession } from '../../lib/ciSession';
+import { isVFSMode } from '../../lib/api';
 import { toast } from 'react-hot-toast';
 
 interface IDEHeaderProps {
@@ -62,6 +65,11 @@ interface IDEHeaderProps {
   onNavigateDashboard: () => void;
   onRefreshTree?: () => Promise<void>;
   onSelectMod?: (modId: string) => void;
+  onToggleRunView?: () => void;
+  hasActiveRun?: boolean;
+  activeRunProgress?: number;
+  centerView?: 'editor' | 'run' | 'gameplay';
+  isBackendOffline?: boolean;
 }
 
 export const IDEHeader: React.FC<IDEHeaderProps> = ({
@@ -89,7 +97,12 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
   handleBuild,
   onNavigateDashboard,
   onRefreshTree,
-  onSelectMod
+  onSelectMod,
+  onToggleRunView,
+  hasActiveRun = false,
+  activeRunProgress = 0,
+  centerView = 'editor',
+  isBackendOffline = true
 }) => {
   const { t, language } = useTranslation();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -195,15 +208,21 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
 
   const handleTriggerGitHubIssueCloudBuild = () => {
     const activeProj = projectId || 'godhand';
+    const session = createCiSession(activeProj);
     const issueTitle = encodeURIComponent(`[CLOUD-BUILD] ${activeProj}`);
     const issueBody = encodeURIComponent(
       `### GodHand Studio Zero-PAT Cloud Build Trigger\n\n` +
       `- **Target Mod Directory**: \`${activeProj}\`\n` +
-      `- **Gradle Loom Runner**: Java 21 LTS\n\n` +
-      `_This build was initiated from GodHand Studio Web IDE (Zero-PAT mode). GitHub Actions will compile this mod and comment the download link upon completion._`
+      `- **Gradle Loom Runner**: Java 21 LTS\n` +
+      `- **CI Session ID**: \`${session.id}\`\n\n` +
+      `_This build was initiated from GodHand Studio Web IDE (Zero-PAT mode). GitHub Actions will compile this mod and comment the download link upon completion._\n\n` +
+      `<!-- GODHAND_CI_SESSION: {"sessionId": "${session.id}", "target": "${activeProj}"} -->`
     );
-    window.open(`https://github.com/JONIMONI09/GodHand-Studio/issues/new?title=${issueTitle}&body=${issueBody}`, '_blank');
-    toast.success(language === 'de' ? 'GitHub Cloud-Build vorbereitet! Klicken Sie auf "Submit new issue".' : 'GitHub Cloud Build prepared! Click "Submit new issue".');
+    window.open(`https://github.com/JONIMONI09/GodHand-Studio/issues/new?title=${issueTitle}&body=${issueBody}&labels=build,task`, '_blank');
+    if (onToggleRunView) {
+      onToggleRunView();
+    }
+    toast.success(language === 'de' ? 'GitHub Cloud-Build mit Labels [build, task] vorbereitet! Klicken Sie auf "Submit new issue".' : 'GitHub Cloud Build with labels [build, task] prepared! Click "Submit new issue".');
   };
 
   return (
@@ -296,176 +315,215 @@ export const IDEHeader: React.FC<IDEHeaderProps> = ({
 
       {/* Right Section: Actions & Utilities */}
       <div className="flex items-center justify-end space-x-1.5 sm:space-x-2 flex-1 min-w-0">
-        {/* Java Version Selector */}
-        <div className="flex items-center bg-[#3c3c3c] rounded px-1.5 py-0.5 flex-shrink-0">
-          <span className="text-[10px] text-slate-400 font-mono mr-1 hidden sm:inline">Java</span>
-          <select
-            value={javaVersion}
-            onChange={(e) => setJavaVersion(e.target.value)}
-            className="bg-transparent text-white text-xs font-mono outline-hidden cursor-pointer py-1"
-            title={t('javaVersion')}
-          >
-            <option value="17" className="bg-[#252526] text-white">{t('java17')}</option>
-            <option value="21" className="bg-[#252526] text-white">{t('java21')}</option>
-          </select>
-        </div>
+        {(hasActiveRun || isBuilding) ? (
+          /* Active Run Focus Mode: Hide clutter buttons so user only sees the started run */
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center bg-amber-500/15 border border-amber-500/30 rounded-lg px-2.5 py-1 text-amber-300 font-mono text-xs animate-pulse">
+              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5 text-amber-400 shrink-0" />
+              <span className="font-semibold truncate max-w-[120px] sm:max-w-none">{t('runStatusRunning')}</span>
+              {activeRunProgress > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500/20 rounded text-[10px] font-bold">
+                  {Math.round(activeRunProgress)}%
+                </span>
+              )}
+            </div>
 
-        {/* Language Switcher */}
-        <LanguageSwitcher />
+            {onToggleRunView && (
+              <button
+                onClick={onToggleRunView}
+                className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                  centerView === 'run'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+                title={centerView === 'run' ? t('switchToEditorView') : t('switchToRunView')}
+              >
+                <Play className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                <span className="hidden sm:inline font-mono">
+                  {centerView === 'run' ? t('switchToEditorView') : t('switchToRunView')}
+                </span>
+              </button>
+            )}
 
-        {/* Git Studio Toggle */}
-        <button 
-          onClick={() => setShowGitStudio(!showGitStudio)} 
-          className={`flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 rounded transition-colors flex-shrink-0 text-xs font-medium ${
-            showGitStudio 
-              ? 'bg-indigo-600 text-white font-semibold shadow-xs' 
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-          }`} 
-          title={t('gitStudio')}
-        >
-          <FolderGit2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          <span className="hidden xl:inline ml-1.5">{t('gitStudio')}</span>
-        </button>
+            <LanguageSwitcher />
+          </div>
+        ) : (
+          /* Normal Ready Mode: Full controls */
+          <>
+            {/* Java Version Selector */}
+            <div className="flex items-center bg-[#3c3c3c] rounded px-1.5 py-0.5 flex-shrink-0">
+              <span className="text-[10px] text-slate-400 font-mono mr-1 hidden sm:inline">Java</span>
+              <select
+                value={javaVersion}
+                onChange={(e) => setJavaVersion(e.target.value)}
+                className="bg-transparent text-white text-xs font-mono outline-hidden cursor-pointer py-1"
+                title={t('javaVersion')}
+              >
+                <option value="17" className="bg-[#252526] text-white">{t('java17')}</option>
+                <option value="21" className="bg-[#252526] text-white">{t('java21')}</option>
+              </select>
+            </div>
 
-        {/* Save Button */}
-        <button 
-          onClick={handleSave} 
-          disabled={isSaving} 
-          className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] disabled:opacity-50 rounded transition-colors flex-shrink-0 text-xs font-medium text-slate-200" 
-          title={t('save')}
-        >
-          <Save className="h-4 w-4 text-slate-300 shrink-0" />
-          <span className="hidden sm:inline ml-1.5">{isSaving ? t('saving') : t('save')}</span>
-        </button>
+            {/* Language Switcher */}
+            <LanguageSwitcher />
 
-        {/* Cloud Compiler & Export Button */}
-        <button
-          onClick={() => setShowCloudBuildModal(true)}
-          className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0 text-xs font-medium"
-          title="Cloud Build & Export"
-        >
-          <Cloud className="h-4 w-4 text-indigo-200 shrink-0" />
-          <span className="hidden lg:inline ml-1.5">{language === 'de' ? 'Cloud & Export' : 'Cloud & Export'}</span>
-        </button>
+            {/* Git Studio Toggle (Only if backend is connected) */}
+            {!isBackendOffline && (
+              <button 
+                onClick={() => setShowGitStudio(!showGitStudio)} 
+                className={`flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 rounded transition-colors flex-shrink-0 text-xs font-medium ${
+                  showGitStudio 
+                    ? 'bg-indigo-600 text-white font-semibold shadow-xs' 
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                }`} 
+                title={t('gitStudio')}
+              >
+                <FolderGit2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                <span className="hidden xl:inline ml-1.5">{t('gitStudio')}</span>
+              </button>
+            )}
 
-        {/* Build Mod Button (Primary CTA) */}
-        <button 
-          onClick={handleBuild}
-          disabled={isBuilding}
-          className="flex items-center justify-center p-1.5 sm:px-3 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded transition-colors flex-shrink-0 text-xs font-semibold shadow-xs"
-          title={t('buildMod')}
-        >
-          <Play className={`h-4 w-4 shrink-0 ${isBuilding ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline ml-1.5">{isBuilding ? t('building') : t('buildMod')}</span>
-        </button>
-
-        {/* Secondary Action Buttons (visible on large screens) */}
-        <div className="hidden lg:flex items-center space-x-1.5">
-          {/* Download JAR */}
-          <button 
-            onClick={handleExportJar}
-            className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] rounded transition-colors text-slate-300 hover:text-white flex-shrink-0 text-xs font-medium" 
-            title={t('downloadJar')}
-          >
-            <Download className="h-4 w-4 shrink-0" />
-            <span className="hidden xl:inline ml-1.5">JAR</span>
-          </button>
-
-          {/* Make Public (Restricted for Core Mods) */}
-          {!isCoreMod ? (
+            {/* Save Button */}
             <button 
-              onClick={() => setShowPublishModal(true)} 
-              className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0 text-xs font-medium" 
-              title={t('publishTitle')}
+              onClick={handleSave} 
+              disabled={isSaving} 
+              className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] disabled:opacity-50 rounded transition-colors flex-shrink-0 text-xs font-medium text-slate-200" 
+              title={t('save')}
             >
-              <Globe className="h-4 w-4 shrink-0" />
-              <span className="hidden xl:inline ml-1.5">{t('makePublic')}</span>
+              <Save className="h-4 w-4 text-slate-300 shrink-0" />
+              <span className="hidden sm:inline ml-1.5">{isSaving ? t('saving') : t('save')}</span>
             </button>
-          ) : (
-            <span
-              className="hidden xl:flex items-center space-x-1 px-2.5 py-1 bg-amber-500/10 text-amber-300/80 border border-amber-500/20 rounded text-xs font-mono cursor-not-allowed select-none"
-              title={t('coreModCannotPublish')}
+
+            {/* Cloud Compiler & Export Button */}
+            <button
+              onClick={() => setShowCloudBuildModal(true)}
+              className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0 text-xs font-medium"
+              title="Cloud Build & Export"
             >
-              <span>🔒</span>
-              <span>{t('coreModProtected')}</span>
-            </span>
-          )}
+              <Cloud className="h-4 w-4 text-indigo-200 shrink-0" />
+              <span className="hidden lg:inline ml-1.5">{language === 'de' ? 'Cloud & Export' : 'Cloud & Export'}</span>
+            </button>
 
-          {/* Support Ticket Modal Toggle */}
-          <button 
-            onClick={() => setShowSupportModal(true)} 
-            className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/20 transition-colors flex-shrink-0 text-xs font-medium" 
-            title={t('openTicket')}
-          >
-            <LifeBuoy className="h-4 w-4 text-indigo-400 shrink-0" />
-          </button>
+            {/* Build Mod Button (Primary CTA) */}
+            <button 
+              onClick={handleBuild}
+              disabled={isBuilding}
+              className="flex items-center justify-center p-1.5 sm:px-3 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded transition-colors flex-shrink-0 text-xs font-semibold shadow-xs"
+              title={t('buildMod')}
+            >
+              <Play className={`h-4 w-4 shrink-0 ${isBuilding ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline ml-1.5">{isBuilding ? t('building') : t('buildMod')}</span>
+            </button>
 
-          {/* Documentation */}
-          <button 
-            onClick={() => setShowDocsModal(true)} 
-            className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition-colors flex-shrink-0 text-xs font-medium" 
-            title={t('documentation')}
-          >
-            <BookOpen className="h-4 w-4 text-emerald-400 shrink-0" />
-          </button>
-        </div>
-
-        {/* Mobile & Small Screen Overflow Menu */}
-        <div className="lg:hidden relative">
-          <button 
-            onClick={() => setShowMoreMenu(!showMoreMenu)} 
-            className="p-1.5 sm:p-2 bg-[#3c3c3c] hover:bg-[#4c4c4c] text-slate-200 rounded transition-colors"
-            title="More Options"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-
-          {showMoreMenu && (
-            <div className="absolute right-0 mt-2 w-48 bg-[#252526] border border-[#3c3c3c] rounded shadow-xl py-1 z-50 text-xs font-medium">
-              <button
-                onClick={() => { setShowMoreMenu(false); setShowCloudBuildModal(true); }}
-                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
+            {/* Secondary Action Buttons (visible on large screens) */}
+            <div className="hidden lg:flex items-center space-x-1.5">
+              {/* Download JAR */}
+              <button 
+                onClick={handleExportJar}
+                className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-[#3c3c3c] hover:bg-[#4c4c4c] rounded transition-colors text-slate-300 hover:text-white flex-shrink-0 text-xs font-medium" 
+                title={t('downloadJar')}
               >
-                <Cloud className="h-3.5 w-3.5 text-indigo-400" />
-                <span>Cloud Build & Export</span>
+                <Download className="h-4 w-4 shrink-0" />
+                <span className="hidden xl:inline ml-1.5">JAR</span>
               </button>
 
-              <button
-                onClick={() => { setShowMoreMenu(false); handleExportJar(); }}
-                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
-              >
-                <Download className="h-3.5 w-3.5 text-slate-400" />
-                <span>{t('downloadJar')}</span>
-              </button>
-
-              {!isCoreMod && (
+              {/* Make Public (Restricted for Core Mods) */}
+              {!isCoreMod ? (
                 <button 
-                  onClick={() => { setShowMoreMenu(false); setShowPublishModal(true); }} 
-                  className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                  onClick={() => setShowPublishModal(true)} 
+                  className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0 text-xs font-medium" 
+                  title={t('publishTitle')}
                 >
-                  <Globe className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>{t('makePublic')}</span>
+                  <Globe className="h-4 w-4 shrink-0" />
+                  <span className="hidden xl:inline ml-1.5">{t('makePublic')}</span>
                 </button>
+              ) : (
+                <span
+                  className="hidden xl:flex items-center space-x-1 px-2.5 py-1 bg-amber-500/10 text-amber-300/80 border border-amber-500/20 rounded text-xs font-mono cursor-not-allowed select-none"
+                  title={t('coreModCannotPublish')}
+                >
+                  <span>🔒</span>
+                  <span>{t('coreModProtected')}</span>
+                </span>
               )}
 
+              {/* Support Ticket Modal Toggle */}
               <button 
-                onClick={() => { setShowMoreMenu(false); setShowSupportModal(true); }} 
-                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
+                onClick={() => setShowSupportModal(true)} 
+                className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/20 transition-colors flex-shrink-0 text-xs font-medium" 
+                title={t('openTicket')}
               >
-                <LifeBuoy className="h-3.5 w-3.5 text-indigo-400" />
-                <span>{t('openTicket')}</span>
+                <LifeBuoy className="h-4 w-4 text-indigo-400 shrink-0" />
               </button>
 
+              {/* Documentation */}
               <button 
-                onClick={() => { setShowMoreMenu(false); setShowDocsModal(true); }} 
-                className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                onClick={() => setShowDocsModal(true)} 
+                className="flex items-center justify-center p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition-colors flex-shrink-0 text-xs font-medium" 
+                title={t('documentation')}
               >
-                <BookOpen className="h-3.5 w-3.5 text-emerald-400" />
-                <span>{t('documentation')}</span>
+                <BookOpen className="h-4 w-4 text-emerald-400 shrink-0" />
               </button>
             </div>
-          )}
-        </div>
+
+            {/* Mobile & Small Screen Overflow Menu */}
+            <div className="lg:hidden relative">
+              <button 
+                onClick={() => setShowMoreMenu(!showMoreMenu)} 
+                className="p-1.5 sm:p-2 bg-[#3c3c3c] hover:bg-[#4c4c4c] text-slate-200 rounded transition-colors"
+                title="More Options"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+
+              {showMoreMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-[#252526] border border-[#3c3c3c] rounded shadow-xl py-1 z-50 text-xs font-medium">
+                  <button
+                    onClick={() => { setShowMoreMenu(false); setShowCloudBuildModal(true); }}
+                    className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
+                  >
+                    <Cloud className="h-3.5 w-3.5 text-indigo-400" />
+                    <span>Cloud Build & Export</span>
+                  </button>
+
+                  <button
+                    onClick={() => { setShowMoreMenu(false); handleExportJar(); }}
+                    className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5 text-slate-400" />
+                    <span>{t('downloadJar')}</span>
+                  </button>
+
+                  {!isCoreMod && (
+                    <button 
+                      onClick={() => { setShowMoreMenu(false); setShowPublishModal(true); }} 
+                      className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                    >
+                      <Globe className="h-3.5 w-3.5 text-indigo-400" />
+                      <span>{t('makePublic')}</span>
+                    </button>
+                  )}
+
+                  <button 
+                    onClick={() => { setShowMoreMenu(false); setShowSupportModal(true); }} 
+                    className="w-full text-left px-3 py-2 flex items-center space-x-2 text-indigo-300 hover:bg-white/5 transition-colors"
+                  >
+                    <LifeBuoy className="h-3.5 w-3.5 text-indigo-400" />
+                    <span>{t('openTicket')}</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setShowMoreMenu(false); setShowDocsModal(true); }} 
+                    className="w-full text-left px-3 py-2 flex items-center space-x-2 text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                  >
+                    <BookOpen className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>{t('documentation')}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* CREATE NEW MOD WIZARD MODAL */}

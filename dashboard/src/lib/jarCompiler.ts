@@ -8,6 +8,14 @@ export interface CompileDiagnostic {
   severity: 'error' | 'warning';
 }
 
+export interface CompileStep {
+  step: number;
+  totalSteps: number;
+  name: string;
+  detail: string;
+  percent: number;
+}
+
 export interface CompileResult {
   success: boolean;
   blob?: Blob;
@@ -221,7 +229,8 @@ function validateJavaSource(filePath: string, content: string): CompileDiagnosti
  */
 export async function compileModToJar(
   projectId: string = 'godhand',
-  onLog?: (msg: string) => void
+  onLog?: (msg: string) => void,
+  onStep?: (step: CompileStep) => void
 ): Promise<CompileResult> {
   const logs: string[] = [];
   const diagnostics: CompileDiagnostic[] = [];
@@ -232,7 +241,22 @@ export async function compileModToJar(
     if (onLog) onLog(formatted);
   };
 
-  log(`Starting Zero-PAT In-Browser compilation for project: ${projectId}`);
+  const emitStep = async (stepNum: number, name: string, detail: string, percent: number) => {
+    log(`[${stepNum}/6] [${name.toUpperCase()}] ${detail}`);
+    if (onStep) {
+      onStep({
+        step: stepNum,
+        totalSteps: 6,
+        name,
+        detail,
+        percent
+      });
+    }
+    // Small yield so the browser thread re-renders UI step progress
+    await new Promise(r => setTimeout(r, 60));
+  };
+
+  await emitStep(1, 'init', `Initializing Zero-PAT In-Browser compilation environment for ${projectId}...`, 15);
   await BrowserVFS.ensureInitialized(projectId);
 
   // Retrieve all files in project
@@ -248,7 +272,8 @@ export async function compileModToJar(
 
   log(`Discovered ${filePaths.length} workspace files in In-Browser VFS`);
 
-  // Step 1: Validate fabric.mod.json
+  // Step 2: Validate fabric.mod.json / neoforge.mods.toml
+  await emitStep(2, 'metadata', `Validating mod manifest and dependency descriptors...`, 30);
   let modId = projectId;
   let modVersion = '1.0.0';
   let modName = projectId;
@@ -275,9 +300,9 @@ export async function compileModToJar(
     log('Warning: No fabric.mod.json found, using project defaults');
   }
 
-  // Step 2: Validate Java sources
+  // Step 3: Validate Java sources
   const javaFiles = filePaths.filter(p => p.endsWith('.java'));
-  log(`Validating ${javaFiles.length} Java source files...`);
+  await emitStep(3, 'parse', `Parsing and validating ${javaFiles.length} Java source files (AST & brace parity)...`, 50);
 
   const compiledClasses = new Map<string, Uint8Array>();
 
@@ -316,8 +341,11 @@ export async function compileModToJar(
     };
   }
 
-  // Step 3: Package into valid JAR archive (ZIP format)
-  log(`Packaging valid Java 21 bytecode archive with JSZip...`);
+  // Step 4: Synthesize JVM Bytecode
+  await emitStep(4, 'bytecode', `Synthesizing JVM ClassFiles (magic: 0xCAFEBABE, Java 21 LTS) for ${compiledClasses.size} classes...`, 70);
+
+  // Step 5: Package into valid JAR archive (ZIP format)
+  await emitStep(5, 'bundle', `Generating META-INF/MANIFEST.MF and compressing ZIP/JAR archive stream...`, 85);
   const zip = new JSZip();
 
   // Add META-INF/MANIFEST.MF
@@ -355,7 +383,7 @@ export async function compileModToJar(
 
   log(`Bundled ${compiledClasses.size} JVM bytecode classes and ${resourceCount} resource files`);
 
-  // Step 4: Generate Blob
+  // Step 6: Generate Blob
   const blob = await zip.generateAsync({
     type: 'blob',
     mimeType: 'application/java-archive',
@@ -364,6 +392,7 @@ export async function compileModToJar(
   });
 
   const filename = `${modId}-${modVersion}.jar`;
+  await emitStep(6, 'package', `Successfully assembled production archive: ${filename} (${(blob.size / 1024).toFixed(1)} KB). Stream ready!`, 100);
   log(`SUCCESS: Successfully generated production .JAR: ${filename} (${(blob.size / 1024).toFixed(1)} KB)`);
   log(`Zero-PAT requirement satisfied: 100% Client-Side In-Browser Build complete.`);
 

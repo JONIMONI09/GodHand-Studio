@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../../i18n/translations';
 import { probeBackendStatus } from '../../lib/api';
+import { detectGpuSupport, getGpuTooltip } from '../../lib/gpuDetection';
 import { toast } from 'react-hot-toast';
 
 interface IDETaskStatusBarProps {
@@ -38,7 +39,7 @@ export const IDETaskStatusBar: React.FC<IDETaskStatusBarProps> = ({
 }) => {
   const { t, language } = useTranslation();
   const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
-  const [isPinging, setIsPinging] = useState(false);
+  const gpuSupport = React.useMemo(() => detectGpuSupport(), []);
 
   useEffect(() => {
     probeBackendStatus().then(online => setIsBackendOnline(online));
@@ -47,31 +48,6 @@ export const IDETaskStatusBar: React.FC<IDETaskStatusBarProps> = ({
     }, 12000);
     return () => clearInterval(interval);
   }, []);
-
-  const handleConnectLocalhost = async () => {
-    setIsPinging(true);
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1500);
-      const res = await fetch('http://localhost:3000/api/health', { signal: controller.signal });
-      clearTimeout(timeout);
-      if (res.ok) {
-        setIsBackendOnline(true);
-        toast.success(language === 'de' ? 'Localhost (3000) erreichbar! Verbinde...' : 'Localhost (3000) online! Connecting...');
-        const cleanHash = window.location.hash || '#/ide/godhand';
-        window.location.href = `http://localhost:3000/${cleanHash}`;
-        return;
-      }
-    } catch (_) {}
-    setIsPinging(false);
-    setIsBackendOnline(false);
-    toast(
-      language === 'de'
-        ? 'Lokaler Server (localhost:3000) nicht erreichbar. GodHand Studio läuft bereits 100% autark im Browser-Modus!'
-        : 'Local server (localhost:3000) unreachable. GodHand Studio is already running 100% standalone in Browser Mode!',
-      { icon: 'ℹ️', duration: 4000 }
-    );
-  };
 
   const activeTaskCount = (isBuilding ? 1 : 0) + (isScanning ? 1 : 0) + (clientStatus === 'starting' ? 1 : 0);
 
@@ -87,18 +63,6 @@ export const IDETaskStatusBar: React.FC<IDETaskStatusBarProps> = ({
               : (language === 'de' ? 'Browser Studio Aktiv (Offline-Ready)' : 'Browser Studio Active (Offline-Ready)')}
           </span>
         </div>
-
-        {!isBackendOnline && typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (
-          <button
-            onClick={handleConnectLocalhost}
-            disabled={isPinging}
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 rounded text-[11px] text-indigo-300 hover:text-white transition"
-            title="Sicher mit http://localhost:3000 verbinden"
-          >
-            {isPinging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Server className="w-3 h-3" />}
-            <span>{language === 'de' ? 'Localhost verbinden' : 'Connect Localhost'}</span>
-          </button>
-        )}
 
         <span className="text-slate-600">|</span>
         <span className="font-mono text-[11px] text-slate-400">Java 21 LTS</span>
@@ -175,17 +139,24 @@ export const IDETaskStatusBar: React.FC<IDETaskStatusBarProps> = ({
         {/* Client & Gameplay Quick Button */}
         <button
           onClick={() => {
+            if (!gpuSupport.supported) {
+              toast.error(getGpuTooltip(language, gpuSupport));
+              return;
+            }
             if (isTerminalCollapsed) onToggleTerminal();
             onSelectTab('gameplay');
           }}
+          disabled={!gpuSupport.supported}
           className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition ${
-            clientStatus === 'running' 
+            !gpuSupport.supported
+              ? 'opacity-40 cursor-not-allowed text-slate-500'
+              : clientStatus === 'running' 
               ? 'bg-emerald-950/70 border border-emerald-500/40 text-emerald-300' 
               : clientStatus === 'starting'
               ? 'bg-amber-950/70 border border-amber-500/40 text-amber-300'
               : 'hover:bg-white/5 text-slate-400'
           }`}
-          title="Open Gameplay Tab"
+          title={getGpuTooltip(language, gpuSupport)}
         >
           <Gamepad2 className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Gameplay</span>

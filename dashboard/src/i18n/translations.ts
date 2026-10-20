@@ -450,7 +450,7 @@ export const translations = {
     openInIde: "Open in Standalone IDE",
     compileCoreMod: "Compile Mod",
     compilingCoreMod: "Compiling Mod...",
-    downloadModJar: "Download JAR",
+    downloadModJar: "Download Compiled Mod (.jar)",
     coreModScaffoldSuccess: "System Core Mod successfully created",
     coreModSaveSuccess: "Source file saved successfully",
     coreModSaveError: "Error saving source file",
@@ -568,7 +568,33 @@ export const translations = {
     sdkDownloadDesc: "Provisioning Temurin OpenJDK 21 for compiling and running Minecraft mods.",
     autoScanActive: "Auto-Scan Active",
     autoScanIdle: "Auto-Scan Ready",
-    send: "Send"
+    send: "Send",
+
+    // Run Pipeline, Progress View & CI Session
+    runPipelineTitle: "Run & Build Pipeline",
+    runStatusRunning: "Compiling & Building...",
+    runStatusSuccess: "Build Successful",
+    runStatusFailed: "Build Failed",
+    runStepInit: "Initialize Environment & VFS",
+    runStepMetadata: "Validate Mod Manifest & Dependencies",
+    runStepValidate: "Parse Java Sources & Check Syntax",
+    runStepBytecode: "Synthesize JVM ClassFiles (0xCAFEBABE, Java 21)",
+    runStepBundle: "Bundle Manifest & Compress JAR Stream",
+    runStepReady: "Deliver Compiled Mod Artifact",
+    applyFixAndRerun: "Apply Fix & Re-run Build",
+    viewRawTerminalLogs: "View Raw Terminal Logs",
+    switchToEditorView: "Code Editor",
+    switchToRunView: "Run Progress",
+    cloudCiSessionTitle: "GitHub Actions CI Session",
+    cloudCiSessionDesc: "Cloud compilation tracked via IssueOps labels: [build, task]",
+    ciTrackingIssue: "Tracking GitHub Issue #{issue}",
+    ciDirectArtifactReady: "Direct Artifact Ready from CI",
+    ciReceiveArtifact: "1-Click Download CI Artifact",
+    retryBuild: "Retry Build",
+    activeRunView: "Active Run",
+    gpuAccelerationRequired: "GPU/WebGL acceleration required to render 3D Minecraft canvas preview",
+    gpuDetected: "GPU: {renderer}",
+    gpuNotDetected: "No functional WebGL GPU detected (CPU-only / headless)"
   },
   de: {
     // General
@@ -1017,7 +1043,7 @@ export const translations = {
     openInIde: "In Vollbild-IDE öffnen",
     compileCoreMod: "Mod kompilieren",
     compilingCoreMod: "Kompiliere Mod...",
-    downloadModJar: "JAR herunterladen",
+    downloadModJar: "Kompilierte Mod (.jar) herunterladen",
     coreModScaffoldSuccess: "System-Mod erfolgreich erstellt",
     coreModSaveSuccess: "Datei erfolgreich gespeichert",
     coreModSaveError: "Fehler beim Speichern der Datei",
@@ -1135,7 +1161,33 @@ export const translations = {
     sdkDownloadDesc: "Temurin OpenJDK 21 wird für das Kompilieren und Ausführen von Minecraft-Mods bereitgestellt.",
     autoScanActive: "Auto-Scan Aktiv",
     autoScanIdle: "Auto-Scan Bereit",
-    send: "Senden"
+    send: "Senden",
+
+    // Run Pipeline, Progress View & CI Session
+    runPipelineTitle: "Run- & Build-Pipeline",
+    runStatusRunning: "Kompiliere und baue...",
+    runStatusSuccess: "Build erfolgreich",
+    runStatusFailed: "Build fehlgeschlagen",
+    runStepInit: "Umgebung & VFS initialisieren",
+    runStepMetadata: "Mod-Manifest & Abhängigkeiten validieren",
+    runStepValidate: "Java-Quelltexte parsen & Syntax prüfen",
+    runStepBytecode: "JVM-ClassFiles synthetisieren (0xCAFEBABE, Java 21)",
+    runStepBundle: "Manifest bündeln & JAR-Stream komprimieren",
+    runStepReady: "Kompiliertes Mod-Artefakt bereitstellen",
+    applyFixAndRerun: "Fix anwenden & Build erneut starten",
+    viewRawTerminalLogs: "Rohe Terminal-Logs anzeigen",
+    switchToEditorView: "Code-Editor",
+    switchToRunView: "Run-Fortschritt",
+    cloudCiSessionTitle: "GitHub Actions CI-Sitzung",
+    cloudCiSessionDesc: "Cloud-Kompilierung überwacht über IssueOps-Labels: [build, task]",
+    ciTrackingIssue: "Überwache GitHub Issue #{issue}",
+    ciDirectArtifactReady: "Direktes Artefakt aus CI bereit",
+    ciReceiveArtifact: "1-Klick CI-Artefakt herunterladen",
+    retryBuild: "Build wiederholen",
+    activeRunView: "Aktiver Run",
+    gpuAccelerationRequired: "GPU/WebGL-Hardwarebeschleunigung erforderlich, um die 3D-Minecraft-Vorschau darzustellen",
+    gpuDetected: "GPU: {renderer}",
+    gpuNotDetected: "Keine funktionale WebGL-GPU erkannt (nur CPU / headless)"
   }
 };
 

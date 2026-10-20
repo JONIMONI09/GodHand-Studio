@@ -21,9 +21,11 @@ import { GitStudio } from './components/GitStudio';
 import { SupportTicketModal } from './components/SupportTicketModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { useActivity } from './context/ActivityContext';
-import { diagnoseJava } from './lib/diagnostics';
+import { diagnoseJava, applyJavaFix, DiagnosticItem } from './lib/diagnostics';
 import { compileModToJar, downloadBlob } from './lib/jarCompiler';
 import { isVFSMode } from './lib/api';
+import { PipelineStep, RunErrorDetail, RunArtifact } from './components/ide/IDERunProgressView';
+import { CiSession, subscribeCiSession, pollCiSession } from './lib/ciSession';
 
 import ModDetails from './pages/ModDetails';
 import { IDEHeader } from './components/ide/IDEHeader';
@@ -31,7 +33,6 @@ import { IDEFileExplorer } from './components/ide/IDEFileExplorer';
 import { IDEEditorArea } from './components/ide/IDEEditorArea';
 import { IDEConsole } from './components/ide/IDEConsole';
 import { IDETaskStatusBar } from './components/ide/IDETaskStatusBar';
-import { SDKDownloadModal } from './components/ide/SDKDownloadModal';
 
 function IDE() {
   const { projectId } = useParams();
@@ -69,6 +70,92 @@ function IDE() {
   const [diagnosticWarnings, setDiagnosticWarnings] = React.useState(0);
   const [clientStatus, setClientStatus] = React.useState<'stopped' | 'starting' | 'running' | 'crashed'>('stopped');
   const [isScanning, setIsScanning] = React.useState(false);
+
+  // Center View & Dedicated Run Progress View state
+  const [centerView, setCenterView] = React.useState<'editor' | 'run' | 'gameplay'>('editor');
+  const [runStatus, setRunStatus] = React.useState<'idle' | 'running' | 'success' | 'failed'>('idle');
+  const [runType, setRunType] = React.useState<'browser-compile' | 'cloud-issueops' | 'client-run'>('browser-compile');
+  const [runProgress, setRunProgress] = React.useState(0);
+  const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
+  const [pipelineSteps, setPipelineSteps] = React.useState<PipelineStep[]>([]);
+  const [runErrorDetails, setRunErrorDetails] = React.useState<RunErrorDetail | null>(null);
+  const [runArtifact, setRunArtifact] = React.useState<RunArtifact | null>(null);
+  const [ciSession, setCiSession] = React.useState<CiSession | null>(null);
+
+  // Subscribe to CI session updates from IssueOps
+  React.useEffect(() => {
+    const unsub = subscribeCiSession((sess) => {
+      setCiSession(sess);
+      if (sess) {
+        if (sess.status === 'pending') {
+          setRunType('cloud-issueops');
+          setRunStatus('running');
+          setRunProgress(20);
+          setCenterView('run');
+          setPipelineSteps([
+            { id: 'issue', stepNum: 1, title: language === 'de' ? 'GitHub Issue & Labels [build, task]' : 'GitHub Issue & Labels [build, task]', description: language === 'de' ? 'IssueOps-Anfrage für Cloud-Build übermittelt' : 'IssueOps cloud build request dispatched', status: 'completed' },
+            { id: 'checkout', stepNum: 2, title: language === 'de' ? 'Repository Checkout & JDK 21' : 'Repository Checkout & JDK 21', description: language === 'de' ? 'GitHub Actions Runner bereitet Umgebung vor' : 'GitHub Actions runner preparing environment', status: 'running' },
+            { id: 'compile', stepNum: 3, title: language === 'de' ? 'Gradle Loom Kompilierung' : 'Gradle Loom Compilation', description: language === 'de' ? 'Kompiliert Java-Quellen und remappt Mod-JAR' : 'Compiling Java sources and remapping mod JAR', status: 'pending' },
+            { id: 'artifact', stepNum: 4, title: language === 'de' ? 'Artefakt-Upload' : 'Artifact Upload', description: language === 'de' ? 'Speichert kompilierte Mod auf GitHub Actions' : 'Uploading compiled mod archive to GitHub Actions', status: 'pending' },
+            { id: 'delivery', stepNum: 5, title: language === 'de' ? 'Direkt-Lieferung an IDE-Session' : 'Direct Delivery to IDE Session', description: language === 'de' ? 'Verbindet Download-Link direkt im Studio' : 'Connecting mod download link directly into studio', status: 'pending' }
+          ]);
+          setBuildLogs(prev => [
+            ...prev,
+            `[IssueOps] Cloud CI Session initialized: ${sess.id}`,
+            `[IssueOps] Tagged with labels: [build, task]`,
+            `[IssueOps] Tracking target mod: ${sess.targetMod}`
+          ]);
+        } else if (sess.status === 'running') {
+          setRunType('cloud-issueops');
+          setRunStatus('running');
+          setRunProgress(60);
+          setPipelineSteps(prev => prev.map((s, idx) => {
+            if (idx < 2) return { ...s, status: 'completed' };
+            if (idx === 2) return { ...s, status: 'running' };
+            return { ...s, status: 'pending' };
+          }));
+        } else if (sess.status === 'success') {
+          setRunType('cloud-issueops');
+          setRunStatus('success');
+          setRunProgress(100);
+          setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+          setRunArtifact({
+            filename: `${sess.targetMod}-1.0.0.jar`,
+            downloadUrl: sess.artifactDownloadUrl
+          });
+          setBuildLogs(prev => [
+            ...prev,
+            `[SUCCESS] GitHub Actions CI build succeeded for run ${sess.runId || ''}!`,
+            `[DIRECT-DELIVERY] Mod JAR ready: ${sess.artifactDownloadUrl || ''}`
+          ]);
+        } else if (sess.status === 'failed') {
+          setRunType('cloud-issueops');
+          setRunStatus('failed');
+          setPipelineSteps(prev => prev.map((s, idx) => {
+            if (idx < 2) return { ...s, status: 'completed' };
+            if (idx === 2) return { ...s, status: 'failed' };
+            return { ...s, status: 'pending' };
+          }));
+          setRunErrorDetails({
+            title: language === 'de' ? 'Cloud CI Actions Build fehlgeschlagen' : 'Cloud CI Actions Build Failed',
+            message: sess.message || (language === 'de' ? 'GitHub Actions Workflow ist fehlgeschlagen. Prüfen Sie die Actions-Logs.' : 'Workflow run on GitHub Actions failed. Check Actions log.')
+          });
+        }
+      }
+    });
+    return unsub;
+  }, [language]);
+
+  // Poll active CI session periodically
+  React.useEffect(() => {
+    if (!ciSession || ciSession.status === 'success' || ciSession.status === 'failed') return;
+    const interval = setInterval(async () => {
+      try {
+        await pollCiSession(ciSession);
+      } catch (_) {}
+    }, 4500);
+    return () => clearInterval(interval);
+  }, [ciSession]);
 
   // Poll client status for task status bar
   React.useEffect(() => {
@@ -351,20 +438,98 @@ function IDE() {
   // Handle build via existing /api/build or core-mod build endpoint
   const handleBuild = async (cmdOrTask?: string) => {
     setIsBuilding(true);
+    setCenterView('run');
+    setRunStatus('running');
+    setRunProgress(5);
+    setCurrentStepIndex(0);
+    setRunErrorDetails(null);
+    setRunArtifact(null);
     setBuildLogs(['[INFO] Starting compiler build pipeline...']);
+
+    const initialSteps: PipelineStep[] = [
+      { id: 'init', stepNum: 1, title: t('runStepInit'), description: 'Checking environment & VFS storage...', status: 'running' },
+      { id: 'metadata', stepNum: 2, title: t('runStepMetadata'), description: 'Verifying mod loader & fabric.mod.json...', status: 'pending' },
+      { id: 'validate', stepNum: 3, title: t('runStepValidate'), description: 'Parsing Java AST and inspecting syntax...', status: 'pending' },
+      { id: 'bytecode', stepNum: 4, title: t('runStepBytecode'), description: 'Synthesizing JVM 21 bytecode (0xCAFEBABE)...', status: 'pending' },
+      { id: 'bundle', stepNum: 5, title: t('runStepBundle'), description: 'Packing MANIFEST.MF and compressing ZIP entries...', status: 'pending' },
+      { id: 'ready', stepNum: 6, title: t('runStepReady'), description: 'Delivering compiled .jar mod binary...', status: 'pending' },
+    ];
+    setPipelineSteps(initialSteps);
     
     try {
       if (isVFSMode()) {
         const targetProj = isCoreMod && coreModId ? coreModId : (projectId || 'godhand');
+        setRunType('browser-compile');
         setBuildLogs([`[Client-Compiler] Initializing Zero-PAT In-Browser compilation for ${targetProj}...`]);
-        const res = await compileModToJar(targetProj, (msg) => {
-          setBuildLogs(prev => [...prev, msg]);
-        });
+        const res = await compileModToJar(
+          targetProj,
+          (msg) => {
+            setBuildLogs(prev => [...prev, msg]);
+          },
+          (step) => {
+            setRunProgress(step.percent);
+            setCurrentStepIndex(step.step - 1);
+            setPipelineSteps(prev => prev.map((s, idx) => {
+              if (idx < step.step - 1) {
+                return { ...s, status: 'completed' };
+              } else if (idx === step.step - 1) {
+                return { ...s, status: 'running', description: step.detail };
+              } else {
+                return { ...s, status: 'pending' };
+              }
+            }));
+          }
+        );
+
         if (res.success && res.blob) {
+          setRunProgress(100);
+          setRunStatus('success');
+          setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+          const artifact: RunArtifact = {
+            filename: res.filename,
+            blob: res.blob,
+            sizeBytes: res.blob.size
+          };
+          setRunArtifact(artifact);
           downloadBlob(res.blob, res.filename);
           setBuildLogs(prev => [...prev, `[SUCCESS] Compiled ${res.filename} (${(res.blob!.size / 1024).toFixed(1)} KB)`]);
           toast.success(language === 'de' ? `Kompilierung erfolgreich: ${res.filename} heruntergeladen!` : `Build successful: Downloaded ${res.filename}!`);
         } else {
+          setRunStatus('failed');
+          const javaDiags = diagnoseJava(code);
+          const typoDiag = javaDiags.find(d => d.type === 'typo' || d.suggestedFix);
+          const firstError = res.diagnostics.find(d => d.severity === 'error') || res.diagnostics[0];
+
+          if (typoDiag) {
+            setRunErrorDetails({
+              title: language === 'de' ? 'Java-Syntaxfehler / Tippfehler erkannt' : 'Java Syntax Error / Typo Detected',
+              message: typoDiag.message,
+              file: activeFile,
+              line: typoDiag.line,
+              suggestedFix: typoDiag.suggestedFix,
+              typo: typoDiag.typo
+            });
+          } else if (firstError) {
+            setRunErrorDetails({
+              title: language === 'de' ? 'Kompilierfehler' : 'Compilation Error',
+              message: firstError.message,
+              file: firstError.file,
+              line: firstError.line,
+              suggestedFix: firstError.message.includes(';') ? 'Add missing semicolon' : undefined
+            });
+          } else {
+            setRunErrorDetails({
+              title: language === 'de' ? 'Build fehlgeschlagen' : 'Build Failed',
+              message: language === 'de' ? 'Unbekannter Compilerfehler aufgetreten.' : 'Unknown compilation error occurred.'
+            });
+          }
+
+          const failedStepIdx = currentStepIndex >= 0 ? currentStepIndex : 2;
+          setPipelineSteps(prev => prev.map((s, idx) => {
+            if (idx < failedStepIdx) return { ...s, status: 'completed' };
+            if (idx === failedStepIdx) return { ...s, status: 'failed' };
+            return { ...s, status: 'pending' };
+          }));
           setBuildLogs(prev => [...prev, `[ERROR] Build aborted with ${res.diagnostics.length} error(s).`]);
           toast.error(language === 'de' ? 'Kompilierung fehlgeschlagen' : 'Build failed');
         }
@@ -372,6 +537,7 @@ function IDE() {
         return;
       }
 
+      setRunType('client-run');
       if (isCoreMod && coreModId) {
         await fetch(`/api/system-mods/${coreModId}/build`, { method: 'POST' });
         const interval = setInterval(async () => {
@@ -383,6 +549,17 @@ function IDE() {
             if (found.status !== 'building') {
               clearInterval(interval);
               setIsBuilding(false);
+              if (found.status === 'ready') {
+                setRunStatus('success');
+                setRunProgress(100);
+                setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+              } else {
+                setRunStatus('failed');
+                setRunErrorDetails({
+                  title: 'Core Mod Build Failed',
+                  message: 'Inspect build logs for stack trace details.'
+                });
+              }
             }
           }
         }, 1000);
@@ -403,12 +580,58 @@ function IDE() {
           if (statusData.buildStatus !== 'building') {
             clearInterval(interval);
             setIsBuilding(false);
+            if (statusData.buildStatus === 'ready' || statusData.buildStatus === 'idle') {
+              setRunStatus('success');
+              setRunProgress(100);
+              setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+            } else {
+              setRunStatus('failed');
+              setRunErrorDetails({
+                title: 'Backend Gradle Build Failed',
+                message: 'Check terminal logs for error output.'
+              });
+            }
           }
         }, 1000);
       }
-    } catch (err) {
+    } catch (err: any) {
       setBuildLogs(prev => [...prev, '[ERROR] Failed to start build.']);
+      setRunStatus('failed');
+      setRunErrorDetails({
+        title: 'Build Process Error',
+        message: err?.message || 'Could not communicate with build pipeline.'
+      });
       setIsBuilding(false);
+    }
+  };
+
+  const handleApplyFixAndRerun = () => {
+    if (runErrorDetails?.suggestedFix) {
+      const fixObj: Partial<DiagnosticItem> = {
+        line: runErrorDetails.line || 1,
+        type: runErrorDetails.typo ? 'typo' : 'syntax',
+        typo: runErrorDetails.typo,
+        suggestedFix: runErrorDetails.suggestedFix
+      };
+      const fixed = applyJavaFix(code, fixObj);
+      if (fixed) {
+        setCode(fixed);
+        toast.success(language === 'de' ? 'Fix angewendet! Starte Build erneut...' : 'Fix applied! Re-running build...');
+        setTimeout(() => {
+          handleBuild();
+        }, 300);
+        return;
+      }
+    }
+    handleBuild();
+  };
+
+  const handleDownloadArtifact = () => {
+    if (runArtifact?.blob) {
+      downloadBlob(runArtifact.blob, runArtifact.filename);
+      toast.success(language === 'de' ? 'Artefakt heruntergeladen!' : 'Artifact downloaded!');
+    } else if (runArtifact?.downloadUrl) {
+      window.open(runArtifact.downloadUrl, '_blank');
     }
   };
 
@@ -972,7 +1195,7 @@ function IDE() {
 
 
   return (
-    <div className="h-screen flex flex-col bg-[#1e1e1e] text-slate-300 overflow-hidden">
+    <div className="h-screen h-[100dvh] flex flex-col bg-[#1e1e1e] text-slate-300 overflow-hidden">
       <IDEHeader
         projectId={projectId}
         isCoreMod={isCoreMod}
@@ -999,6 +1222,11 @@ function IDE() {
         onNavigateDashboard={() => navigate('/dashboard')}
         onRefreshTree={refreshFileTree}
         onSelectMod={(newId) => navigate(`/ide/${newId}`)}
+        onToggleRunView={() => setCenterView(prev => prev === 'run' ? 'editor' : 'run')}
+        hasActiveRun={runStatus === 'running' || isBuilding}
+        activeRunProgress={runProgress}
+        centerView={centerView}
+        isBackendOffline={isBackendOffline}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -1060,6 +1288,22 @@ function IDE() {
             onToggleSidebar={toggleSidebarCollapse}
             isTerminalCollapsed={isTerminalCollapsed}
             onToggleTerminal={toggleTerminalCollapse}
+            centerView={centerView}
+            onSelectCenterView={setCenterView}
+            projectId={isCoreMod && coreModId ? coreModId : (projectId || 'godhand')}
+            runStatus={runStatus}
+            runType={runType}
+            runProgress={runProgress}
+            currentStepIndex={currentStepIndex}
+            pipelineSteps={pipelineSteps}
+            runLogs={buildLogs}
+            runErrorDetails={runErrorDetails}
+            runArtifact={runArtifact}
+            ciSession={ciSession}
+            onApplyFix={handleApplyFixAndRerun}
+            onDownloadArtifact={handleDownloadArtifact}
+            onRerun={() => handleBuild()}
+            isBackendOffline={isBackendOffline}
           />
 
           <IDEConsole

@@ -23,7 +23,8 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../../i18n/translations';
 import { toast } from 'react-hot-toast';
-import { IDEGameplayTab } from './IDEGameplayTab';
+import { GameplayView } from './GameplayView';
+import { detectGpuSupport, getGpuTooltip } from '../../lib/gpuDetection';
 import { diagnoseJava, applyJavaFix as clientApplyFix, DiagnosticItem } from '../../lib/diagnostics';
 
 interface IDEConsoleProps {
@@ -72,6 +73,7 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
   const { t, language } = useTranslation();
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const gpuSupport = React.useMemo(() => detectGpuSupport(), []);
   const [internalTab, setInternalTab] = useState<'logs' | 'tasks' | 'diagnose' | 'gameplay'>('logs');
   const activeTab = propActiveTab || internalTab;
   const setActiveTab = (tab: 'logs' | 'tasks' | 'diagnose' | 'gameplay') => {
@@ -94,6 +96,34 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanSummary, setScanSummary] = useState<{ javaVer: string; targetMc: string } | null>(null);
+
+  // Intelligent compilation step detection from logs
+  const activeCompileStep = React.useMemo(() => {
+    for (let i = buildLogs.length - 1; i >= 0; i--) {
+      const l = buildLogs[i];
+      const match = l.match(/\[(\d+)\/(\d+)\]\s*\[(\w+)\]\s*(.*)/);
+      if (match) {
+        return {
+          stepNum: parseInt(match[1], 10),
+          totalSteps: parseInt(match[2], 10),
+          stage: match[3],
+          detail: match[4],
+          percent: Math.min(100, Math.round((parseInt(match[1], 10) / parseInt(match[2], 10)) * 100))
+        };
+      }
+      const taskMatch = l.match(/>\s*Task\s*:(\w+)/);
+      if (taskMatch) {
+        return {
+          stepNum: 3,
+          totalSteps: 5,
+          stage: taskMatch[1].toUpperCase(),
+          detail: `Gradle Loom: :${taskMatch[1]}`,
+          percent: 60
+        };
+      }
+    }
+    return null;
+  }, [buildLogs]);
 
   // Auto-scroll when new logs arrive and console is open
   useEffect(() => {
@@ -375,15 +405,22 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                if (!gpuSupport.supported) {
+                  toast.error(getGpuTooltip(language, gpuSupport));
+                  return;
+                }
                 setActiveTab('gameplay');
                 if (isTerminalCollapsed) onToggleCollapse();
               }}
+              disabled={!gpuSupport.supported}
               className={`flex items-center space-x-1.5 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
-                activeTab === 'gameplay'
+                !gpuSupport.supported
+                  ? 'opacity-40 cursor-not-allowed text-slate-500'
+                  : activeTab === 'gameplay'
                   ? 'bg-[#1e1e1e] text-emerald-300 border-b-2 border-emerald-400'
                   : 'text-slate-400 hover:text-emerald-300 hover:bg-[#323238]'
               }`}
-              title={t('gameplay')}
+              title={getGpuTooltip(language, gpuSupport)}
             >
               <Gamepad2 className="h-3.5 w-3.5 text-emerald-400" />
               <span>{t('gameplay')}</span>
@@ -391,9 +428,13 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
 
             {/* Quick Status Indicator */}
             {isBuilding ? (
-              <span className="hidden md:flex items-center space-x-1 text-[11px] text-amber-300 ml-2 font-mono">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>{t('consoleRunning')}</span>
+              <span className="hidden sm:flex items-center space-x-1.5 text-[11px] text-amber-300 ml-2 font-mono bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded animate-pulse">
+                <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+                <span className="font-semibold">
+                  {activeCompileStep
+                    ? `[${activeCompileStep.stepNum}/${activeCompileStep.totalSteps} ${activeCompileStep.stage}] ${activeCompileStep.percent}%`
+                    : t('consoleRunning')}
+                </span>
               </span>
             ) : hasSuccess ? (
               <span className="hidden md:flex items-center space-x-1 text-[11px] text-emerald-400 ml-2 font-mono">
@@ -449,32 +490,91 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
         {/* Content Panel Body */}
         {!isTerminalCollapsed && (
           <div className="flex-1 overflow-y-auto bg-[#141416]">
-            {/* VIEW 1: Standard Logs */}
+            {/* VIEW 1: Standard Logs with Intelligent Compilation Steps */}
             {activeTab === 'logs' && (
               <div className="p-3 font-mono text-xs space-y-0.5 select-text">
+                {/* Intelligent Live Compilation Steps Banner in Terminal */}
+                {isBuilding && activeCompileStep && (
+                  <div className="bg-[#1b1a26] border border-indigo-500/30 rounded-xl p-3 mb-2 shadow-md">
+                    <div className="flex items-center justify-between text-xs mb-1.5 font-mono">
+                      <span className="flex items-center space-x-2 text-indigo-300 font-semibold">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400 shrink-0" />
+                        <span>Step {activeCompileStep.stepNum} of {activeCompileStep.totalSteps}: <span className="text-amber-300 font-bold">{activeCompileStep.stage}</span></span>
+                      </span>
+                      <span className="text-indigo-400 font-bold">{activeCompileStep.percent}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-[#121216] rounded-full overflow-hidden border border-white/5">
+                      <div 
+                        className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 rounded-full transition-all duration-300 animate-pulse"
+                        style={{ width: `${Math.max(5, activeCompileStep.percent)}%` }}
+                      />
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1.5 truncate font-mono">
+                      {activeCompileStep.detail}
+                    </div>
+                  </div>
+                )}
+
                 {buildLogs.length === 0 ? (
                   <div className="text-slate-500 py-2">
                     {t('clickBuildToCompile')}
                   </div>
                 ) : (
-                  buildLogs.map((log, i) => (
-                    <div 
-                      key={i} 
-                      className={`leading-relaxed whitespace-pre-wrap break-all ${
-                        log.includes('SUCCESS') || log.includes('BUILD SUCCESSFUL')
-                          ? 'text-emerald-400 font-bold'
-                          : log.includes('ERROR') || log.includes('FAILED')
-                          ? 'text-rose-400'
-                          : log.includes('WARN')
-                          ? 'text-amber-300'
-                          : log.startsWith('>') || log.startsWith('$')
-                          ? 'text-indigo-300 font-semibold'
-                          : 'text-slate-300'
-                      }`}
-                    >
-                      {log}
-                    </div>
-                  ))
+                  buildLogs.map((log, i) => {
+                    const stepMatch = log.match(/\[(\d+)\/(\d+)\]\s*\[(\w+)\]\s*(.*)/);
+                    if (stepMatch) {
+                      const [, cur, total, stage, detail] = stepMatch;
+                      const stageColors: Record<string, string> = {
+                        INIT: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+                        METADATA: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+                        PARSE: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+                        BYTECODE: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+                        BUNDLE: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                        PACKAGE: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      };
+                      const badgeClass = stageColors[stage] || 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
+                      return (
+                        <div key={i} className="flex items-start space-x-2 py-0.5 font-mono">
+                          <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0 ${badgeClass}`}>
+                            [{cur}/{total} {stage}]
+                          </span>
+                          <span className="text-slate-200 leading-relaxed break-all">
+                            {detail}
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    if (log.startsWith('> Task :')) {
+                      return (
+                        <div key={i} className="flex items-center space-x-2 py-0.5 text-indigo-300 font-mono font-semibold">
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 shrink-0">
+                            GRADLE
+                          </span>
+                          <span>{log}</span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div 
+                        key={i} 
+                        className={`leading-relaxed whitespace-pre-wrap break-all ${
+                          log.includes('SUCCESS') || log.includes('BUILD SUCCESSFUL')
+                            ? 'text-emerald-400 font-bold'
+                            : log.includes('ERROR') || log.includes('FAILED')
+                            ? 'text-rose-400'
+                            : log.includes('WARN')
+                            ? 'text-amber-300'
+                            : log.startsWith('>') || log.startsWith('$')
+                            ? 'text-indigo-300 font-semibold'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {log}
+                      </div>
+                    );
+                  })
                 )}
                 <div ref={logsEndRef} />
               </div>
@@ -674,7 +774,7 @@ export const IDEConsole: React.FC<IDEConsoleProps> = ({
 
             {/* VIEW 4: Gameplay Tab & Live In-Browser Client Preview */}
             {activeTab === 'gameplay' && (
-              <IDEGameplayTab onToggleTerminal={onToggleCollapse} terminalLogs={buildLogs} />
+              <GameplayView onToggleTerminal={onToggleCollapse} terminalLogs={buildLogs} />
             )}
           </div>
         )}

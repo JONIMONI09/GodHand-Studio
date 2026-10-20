@@ -53,6 +53,22 @@ jobs:
           find mods -name "gradlew" -exec chmod +x {} + || true
         fi
 
+    - name: Label Issue
+      if: github.event_name == 'issues' && contains(github.event.issue.title, '[CLOUD-BUILD]')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          try {
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['build', 'task']
+            });
+          } catch (e) {
+            console.log('Error adding labels:', e.message);
+          }
+
     - name: Build with Gradle Wrapper (and Run Tests)
       run: |
         if [ "${{ github.event_name }}" = "issues" ]; then
@@ -68,28 +84,47 @@ jobs:
           TARGET="${{ github.event.inputs.targetMod || 'godhand' }}"
         fi
 
+        DIR="godhand"
         if [ -d "$TARGET" ]; then
-          echo "Building target mod directory: $TARGET"
-          cd "$TARGET"
-          if [ -f "gradlew" ]; then
-            ./gradlew build
-          else
-            gradle build || true
-          fi
+          DIR="$TARGET"
+        elif [ -d "mods/$TARGET" ]; then
+          DIR="mods/$TARGET"
         else
-          echo "Target $TARGET not found, falling back to godhand"
-          cd godhand
+          echo "Target $TARGET not found directly, searching workspace..."
+          FOUND=$(find mods -maxdepth 2 -type d -name "$TARGET" 2>/dev/null | head -n 1)
+          if [ -n "$FOUND" ] && [ -d "$FOUND" ]; then
+            DIR="$FOUND"
+          fi
+        fi
+
+        echo "Building target mod directory: $DIR"
+        cd "$DIR"
+        if [ -f "gradlew" ]; then
           ./gradlew build
+        else
+          gradle build || true
         fi
 
     - name: Comment on Issue
-      if: github.event_name == 'issues' && always()
+      if: github.event_name == 'issues' && contains(github.event.issue.title, '[CLOUD-BUILD]') && always()
       uses: actions/github-script@v7
       with:
         script: |
-          const status = '${{ job.status }}' === 'success' ? '✅ **Success**' : '❌ **Failed**';
-          const body = status + ' - Cloud Build completed for run: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + '\n\nCompiled JAR artifacts are available under the workflow run and Releases.';
-          github.rest.issues.createComment({
+          const isSuccess = '${{ job.status }}' === 'success';
+          const status = isSuccess ? '✅ **Success**' : '❌ **Failed**';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          const artifactUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts`;
+          const body = [
+            `### ⚡ GodHand Studio Cloud Build Result`,
+            `- **Status**: ${status}`,
+            `- **Workflow Run**: [View Run on GitHub Actions](${runUrl})`,
+            `- **Direct Artifact**: [Download Compiled Mod JAR](${artifactUrl})`,
+            ``,
+            `_Delivered directly to GodHand Studio Web IDE Session._`,
+            `<!-- GODHAND_CI_SESSION: {"status": "${{ job.status }}", "runId": "${context.runId}", "artifactUrl": "${artifactUrl}", "issueNumber": ${context.issue.number}} -->`
+          ].join('\n');
+
+          await github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
