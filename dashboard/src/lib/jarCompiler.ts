@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { BrowserVFS } from './vfs';
+import { BrowserVFS, isBinaryAssetPath, toBinaryPayload } from './vfs';
 import { diagnoseJava } from './diagnostics';
 
 export interface CompileDiagnostic {
@@ -513,8 +513,13 @@ export async function compileModToJar(
       let content = await BrowserVFS.getFile(filePath, projectId);
       if (relResource === 'fabric.mod.json' || relResource.endsWith('.json') || relResource.endsWith('.toml')) {
         content = expandManifestTokens(content, { version: modVersion, minecraftVersion: mcVersion, modId });
+        zip.file(relResource, content);
+      } else if (isBinaryAssetPath(relResource)) {
+        const payload = toBinaryPayload(content);
+        zip.file(relResource, payload, { binary: true });
+      } else {
+        zip.file(relResource, content);
       }
-      zip.file(relResource, content);
       resourceCount++;
     } else if (norm.endsWith('godhand-mod.json') || norm.endsWith('godhand.json')) {
       let content = await BrowserVFS.getFile(filePath, projectId);

@@ -21,11 +21,13 @@ import {
   FolderDown,
   FolderUp,
   Upload,
-  Download
+  Download,
+  Edit2,
+  Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from '../../i18n/translations';
 import { toast } from 'react-hot-toast';
-import { BrowserVFS } from '../../lib/vfs';
+import { BrowserVFS, validateFileName, validatePath } from '../../lib/vfs';
 
 interface IDEFileExplorerProps {
   onRefreshTree?: () => Promise<void>;
@@ -53,6 +55,7 @@ interface IDEFileExplorerProps {
   setNewFileName: (name: string) => void;
   handleCreateFile: (folderPath: string) => void;
   handleDeleteFile: (filePath: string, isFolder: boolean) => void;
+  onRenameNode?: (oldPath: string, newPath: string, isFolder: boolean) => Promise<void>;
   openMoveModal: (node: any) => void;
   draggingNode: any;
   setDraggingNode: (node: any) => void;
@@ -91,6 +94,7 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
   setNewFileName,
   handleCreateFile,
   handleDeleteFile,
+  onRenameNode,
   openMoveModal,
   draggingNode,
   setDraggingNode,
@@ -105,6 +109,22 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
   const { t, language } = useTranslation();
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string>('');
+
+  const handleCreateFileWithValidation = (targetFolder: string) => {
+    const val = validateFileName(newFileName);
+    if (!val.valid) {
+      toast.error(val.error || 'Ungültiger Dateiname');
+      return;
+    }
+    const trimmed = newFileName.trim();
+    if (!trimmed) {
+      setCreatingFileIn(null);
+      return;
+    }
+    handleCreateFile(targetFolder);
+  };
 
   const handleOpenLocalFolder = async () => {
     if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
@@ -412,10 +432,56 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
               ) : (
                 <>
                   <div className="w-3.5 shrink-0"></div>
-                  <File className={`h-4 w-4 shrink-0 ${node.name.endsWith('.java') ? 'text-amber-400' : 'text-slate-400'}`} />
+                  {/\.(png|jpe?g|gif|webp|ico|svg|bmp)$/i.test(node.name) ? (
+                    <ImageIcon className="h-4 w-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <File className={`h-4 w-4 shrink-0 ${node.name.endsWith('.java') ? 'text-amber-400' : 'text-slate-400'}`} />
+                  )}
                 </>
               )}
-              <span className="text-[13px] truncate">{node.name}</span>
+              {renamingPath === node.path ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={async e => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      const val = validateFileName(renameValue);
+                      if (!val.valid) {
+                        toast.error(val.error || 'Ungültiger Dateiname');
+                        return;
+                      }
+                      const trimmed = renameValue.trim();
+                      if (trimmed === node.name) {
+                        setRenamingPath(null);
+                        return;
+                      }
+                      const parent = node.path.includes('/') ? node.path.substring(0, node.path.lastIndexOf('/')) : '';
+                      const newPath = parent ? `${parent}/${trimmed}` : trimmed;
+                      try {
+                        if (onRenameNode) {
+                          await onRenameNode(node.path, newPath, node.type === 'folder');
+                        } else {
+                          await BrowserVFS.rename(node.path, newPath, projectId || 'godhand');
+                          if (onRefreshTree) await onRefreshTree();
+                        }
+                        setRenamingPath(null);
+                      } catch (err: any) {
+                        toast.error(err.message || 'Failed to rename');
+                      }
+                    }
+                    if (e.key === 'Escape') {
+                      setRenamingPath(null);
+                    }
+                  }}
+                  onBlur={() => setRenamingPath(null)}
+                  onClick={e => e.stopPropagation()}
+                  className="bg-[#3c3c3c] text-white text-[13px] px-1 py-0.5 border border-[#007acc] focus:outline-none rounded flex-1 min-w-0"
+                />
+              ) : (
+                <span className="text-[13px] truncate">{node.name}</span>
+              )}
             </div>
 
             {/* Action buttons on hover */}
@@ -433,6 +499,17 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
                 title={t('moveItemDown')}
               >
                 <ArrowDown className="h-3 w-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenamingPath(node.path);
+                  setRenameValue(node.name);
+                }}
+                className="p-1 hover:bg-slate-700 text-slate-400 hover:text-amber-300 rounded transition-colors"
+                title={t('rename') || 'Rename'}
+              >
+                <Edit2 className="h-3 w-3" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); openMoveModal(node); }}
@@ -474,7 +551,7 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
                   value={newFileName}
                   onChange={e => setNewFileName(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter') handleCreateFile(node.path);
+                    if (e.key === 'Enter') handleCreateFileWithValidation(node.path);
                     if (e.key === 'Escape') setCreatingFileIn(null);
                   }}
                   onBlur={() => setCreatingFileIn(null)}
@@ -824,7 +901,7 @@ export const IDEFileExplorer: React.FC<IDEFileExplorerProps> = ({
                 value={newFileName}
                 onChange={e => setNewFileName(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') handleCreateFile('');
+                  if (e.key === 'Enter') handleCreateFileWithValidation('');
                   if (e.key === 'Escape') setCreatingFileIn(null);
                 }}
                 onBlur={() => setCreatingFileIn(null)}

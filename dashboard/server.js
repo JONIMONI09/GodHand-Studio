@@ -17,7 +17,11 @@ import {
   classifyClientLogLine,
   pickMinecraftWindowTitle,
   diagnoseJava,
-  applyJavaFix
+  applyJavaFix,
+  validateFileName,
+  validatePath,
+  isBinaryAssetPath,
+  getBinaryAssetMime
 } from './lib/runtime.mjs';
 
 dotenv.config();
@@ -724,7 +728,7 @@ function resolveAndCheckPath(filePath, projectBase = path.resolve(ROOT_DIR, 'god
   // Strip leading slashes to prevent path.resolve treating it as filesystem root
   const cleaned = filePath.replace(/^[/\\]+/, '');
   const fullPath = path.resolve(projectBase, cleaned);
-  if (!fullPath.startsWith(projectBase)) return null;
+  if (fullPath !== projectBase && !fullPath.startsWith(projectBase + path.sep)) return null;
   return fullPath;
 }
 
@@ -743,13 +747,23 @@ app.get('/api/fs/file', (req, res) => {
   const project = req.query.projectId || req.query.project;
   if (!filePath) return res.status(400).json({ error: 'Path is required' });
   
+  const pathVal = validatePath(filePath);
+  if (!pathVal.valid) return res.status(400).json({ error: pathVal.error });
+
   const projectBase = project ? getSystemModDir(project) : path.resolve(ROOT_DIR, 'godhand');
   const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-    const content = fs.readFileSync(fullPath, 'utf8');
-    res.json({ content });
+    if (isBinaryAssetPath(filePath)) {
+      const buffer = fs.readFileSync(fullPath);
+      const mime = getBinaryAssetMime(fullPath);
+      const content = `data:${mime};base64,${buffer.toString('base64')}`;
+      res.json({ content });
+    } else {
+      const content = fs.readFileSync(fullPath, 'utf8');
+      res.json({ content });
+    }
   } else {
     res.status(404).json({ error: 'File not found' });
   }
@@ -759,12 +773,15 @@ app.post('/api/fs/file', (req, res) => {
   const { path: filePath, content, projectId, project } = req.body;
   if (!filePath || content === undefined) return res.status(400).json({ error: 'Path and content are required' });
   
+  const pathVal = validatePath(filePath);
+  if (!pathVal.valid) return res.status(400).json({ error: pathVal.error });
+
   const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
   const fullPath = resolveAndCheckPath(filePath, projectBase);
   if (!fullPath) return res.status(403).json({ error: 'Invalid or restricted path access' });
 
   // Quota check: prevent files larger than 5MB
-  if (Buffer.byteLength(content, 'utf8') > 5 * 1024 * 1024) {
+  if (typeof content === 'string' && Buffer.byteLength(content, 'utf8') > 5 * 1024 * 1024) {
     return res.status(413).json({ error: 'File size exceeds 5MB quota limit' });
   }
 
@@ -774,7 +791,19 @@ app.post('/api/fs/file', (req, res) => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(fullPath, content, 'utf8');
+    if (typeof content === 'string' && content.startsWith('data:') && content.includes(';base64,')) {
+      const b64 = content.substring(content.indexOf(';base64,') + 8).replace(/\s+/g, '');
+      fs.writeFileSync(fullPath, Buffer.from(b64, 'base64'));
+    } else if (isBinaryAssetPath(filePath) && typeof content === 'string') {
+      const clean = content.trim().replace(/\s+/g, '');
+      if (clean.startsWith('iVBORw0KGgo') || (/^[A-Za-z0-9+/=]+$/.test(clean) && clean.length % 4 === 0 && clean.length >= 16)) {
+        fs.writeFileSync(fullPath, Buffer.from(clean, 'base64'));
+      } else {
+        fs.writeFileSync(fullPath, Buffer.from(content, 'binary'));
+      }
+    } else {
+      fs.writeFileSync(fullPath, content, 'utf8');
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -786,6 +815,11 @@ app.post('/api/fs/move', (req, res) => {
   if (!sourcePath || !destinationPath) {
     return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
   }
+
+  const srcVal = validatePath(sourcePath);
+  if (!srcVal.valid) return res.status(400).json({ error: srcVal.error });
+  const dstVal = validatePath(destinationPath);
+  if (!dstVal.valid) return res.status(400).json({ error: dstVal.error });
 
   const projectBase = (projectId || project) ? getSystemModDir(projectId || project) : path.resolve(ROOT_DIR, 'godhand');
   const srcFullPath = resolveAndCheckPath(sourcePath, projectBase);
@@ -828,6 +862,11 @@ app.post('/api/fs/move', (req, res) => {
     console.error('Error moving file:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/api/fs/rename', (req, res) => {
+  req.url = '/api/fs/move';
+  app.handle(req, res);
 });
 
 // --- Git Management API ---
@@ -1126,7 +1165,10 @@ app.get('/api/fs/folders', (req, res) => {
 
 app.delete('/api/fs/file', (req, res) => {
   const { path: filePath } = req.query;
-  if (!filePath) return res.status(400).json({ error: 'Path is required' });
+  if (!filePath || typeof filePath !== 'string') return res.status(400).json({ error: 'Path is required' });
+
+  const pathVal = validatePath(filePath);
+  if (!pathVal.valid) return res.status(400).json({ error: pathVal.error });
 
   const fullPath = resolveAndCheckPath(filePath);
   const projectBase = path.resolve(ROOT_DIR, 'godhand');
@@ -1413,16 +1455,27 @@ app.get('/api/system-mods/:id/file', (req, res) => {
   if (!relativePath || typeof relativePath !== 'string') {
     return res.status(400).json({ error: 'Path is required' });
   }
+  const pathVal = validatePath(relativePath);
+  if (!pathVal.valid) {
+    return res.status(400).json({ error: pathVal.error });
+  }
   const resolved = path.resolve(modDir, relativePath);
-  if (!resolved.startsWith(modDir)) {
+  if (resolved !== modDir && !resolved.startsWith(modDir + path.sep)) {
     return res.status(403).json({ error: 'Access denied: path outside mod directory' });
   }
   if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
     return res.status(404).json({ error: 'File not found' });
   }
   try {
-    const content = fs.readFileSync(resolved, 'utf8');
-    res.json({ content, path: relativePath });
+    if (isBinaryAssetPath(relativePath)) {
+      const buffer = fs.readFileSync(resolved);
+      const mime = getBinaryAssetMime(resolved);
+      const content = `data:${mime};base64,${buffer.toString('base64')}`;
+      res.json({ content, path: relativePath });
+    } else {
+      const content = fs.readFileSync(resolved, 'utf8');
+      res.json({ content, path: relativePath });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1434,13 +1487,29 @@ app.post('/api/system-mods/:id/file', (req, res) => {
   if (!relativePath || typeof relativePath !== 'string' || content === undefined) {
     return res.status(400).json({ error: 'Path and content are required' });
   }
+  const pathVal = validatePath(relativePath);
+  if (!pathVal.valid) {
+    return res.status(400).json({ error: pathVal.error });
+  }
   const resolved = path.resolve(modDir, relativePath);
-  if (!resolved.startsWith(modDir)) {
+  if (resolved !== modDir && !resolved.startsWith(modDir + path.sep)) {
     return res.status(403).json({ error: 'Access denied: path outside mod directory' });
   }
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
-    fs.writeFileSync(resolved, content, 'utf8');
+    if (typeof content === 'string' && content.startsWith('data:') && content.includes(';base64,')) {
+      const b64 = content.substring(content.indexOf(';base64,') + 8).replace(/\s+/g, '');
+      fs.writeFileSync(resolved, Buffer.from(b64, 'base64'));
+    } else if (isBinaryAssetPath(relativePath) && typeof content === 'string') {
+      const clean = content.trim().replace(/\s+/g, '');
+      if (clean.startsWith('iVBORw0KGgo') || (/^[A-Za-z0-9+/=]+$/.test(clean) && clean.length % 4 === 0 && clean.length >= 16)) {
+        fs.writeFileSync(resolved, Buffer.from(clean, 'base64'));
+      } else {
+        fs.writeFileSync(resolved, Buffer.from(content, 'binary'));
+      }
+    } else {
+      fs.writeFileSync(resolved, content, 'utf8');
+    }
     res.json({ success: true, path: relativePath });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1453,8 +1522,12 @@ app.delete('/api/system-mods/:id/file', (req, res) => {
   if (!relativePath || typeof relativePath !== 'string') {
     return res.status(400).json({ error: 'Path is required' });
   }
+  const pathVal = validatePath(relativePath);
+  if (!pathVal.valid) {
+    return res.status(400).json({ error: pathVal.error });
+  }
   const resolved = path.resolve(modDir, relativePath);
-  if (!resolved.startsWith(modDir) || resolved === modDir) {
+  if (resolved === modDir || !resolved.startsWith(modDir + path.sep)) {
     return res.status(403).json({ error: 'Access denied: cannot delete base mod root or outside path' });
   }
   if (!fs.existsSync(resolved)) {
@@ -1509,12 +1582,17 @@ app.post('/api/system-mods/:id/move', (req, res) => {
     return res.status(400).json({ error: 'sourcePath and destinationPath are required' });
   }
 
+  const srcVal = validatePath(sourcePath);
+  if (!srcVal.valid) return res.status(400).json({ error: srcVal.error });
+  const dstVal = validatePath(destinationPath);
+  if (!dstVal.valid) return res.status(400).json({ error: dstVal.error });
+
   const cleanSrc = sourcePath.replace(/^[/\\]+/, '');
   const cleanDst = destinationPath.replace(/^[/\\]+/, '');
   const srcFullPath = path.resolve(modDir, cleanSrc);
   let destFullPath = path.resolve(modDir, cleanDst);
 
-  if (!srcFullPath.startsWith(modDir) || !destFullPath.startsWith(modDir)) {
+  if ((srcFullPath !== modDir && !srcFullPath.startsWith(modDir + path.sep)) || (destFullPath !== modDir && !destFullPath.startsWith(modDir + path.sep))) {
     return res.status(403).json({ error: 'Invalid or restricted path access' });
   }
   if (!fs.existsSync(srcFullPath)) {
@@ -1543,6 +1621,11 @@ app.post('/api/system-mods/:id/move', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/api/system-mods/:id/rename', (req, res) => {
+  req.url = `/api/system-mods/${req.params.id}/move`;
+  app.handle(req, res);
 });
 
 app.post('/api/system-mods/:id/build', (req, res) => {

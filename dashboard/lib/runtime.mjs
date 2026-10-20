@@ -260,3 +260,138 @@ export function applyJavaFix(code, { line, typo, suggestedFix, type } = {}) {
   }
   return lines.join('\n');
 }
+
+export const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$|clock\$)(\..*)?$/i;
+export const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f\x7f]/;
+
+/** Validates single filename against Windows reserved device names and invalid characters. */
+export function validateFileName(name) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return { valid: false, error: 'File name cannot be empty', code: 'EMPTY_PATH' };
+  }
+  if (name.startsWith(' ') || name.endsWith(' ') || name.endsWith('.')) {
+    return { valid: false, error: `File name "${name}" cannot start or end with a space, or end with a period`, code: 'TRAILING_DOT_OR_SPACE' };
+  }
+  const trimmed = name.trim();
+  if (INVALID_FILENAME_CHARS.test(trimmed)) {
+    return { valid: false, error: `File name "${trimmed}" contains forbidden characters (<>:"/\\|?*)`, code: 'INVALID_CHARACTERS' };
+  }
+  if (WINDOWS_RESERVED_NAMES.test(trimmed)) {
+    return { valid: false, error: `"${trimmed}" is a Windows reserved device name (CON, PRN, AUX, NUL, COM0-9, LPT0-9, CONIN$, CONOUT$, CLOCK$)`, code: 'RESERVED_DEVICE_NAME' };
+  }
+  return { valid: true };
+}
+
+/** Validates relative path segments against directory traversal, URL encoding exploits, and invalid names. */
+export function validatePath(pathStr) {
+  if (!pathStr || typeof pathStr !== 'string' || !pathStr.trim()) {
+    return { valid: false, error: 'Path cannot be empty', code: 'EMPTY_PATH' };
+  }
+  let decoded = pathStr;
+  try {
+    decoded = decodeURIComponent(pathStr);
+  } catch (_) {
+    return { valid: false, error: 'Path contains invalid URL encoding', code: 'INVALID_CHARACTERS' };
+  }
+  if (decoded.includes('%')) {
+    try {
+      const doubleDecoded = decodeURIComponent(decoded);
+      if (doubleDecoded !== decoded) {
+        decoded = doubleDecoded;
+      }
+    } catch (_) {}
+  }
+  const normalized = decoded.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return { valid: false, error: 'Path cannot be empty', code: 'EMPTY_PATH' };
+  }
+  for (const segment of segments) {
+    if (segment === '..' || segment === '.') {
+      return { valid: false, error: 'Directory traversal (..) is strictly prohibited', code: 'PATH_TRAVERSAL' };
+    }
+    const res = validateFileName(segment);
+    if (!res.valid) return res;
+  }
+  return { valid: true };
+}
+
+/** Checks if a file path corresponds to a binary mod asset (textures, audio, fonts, nbt, etc.). */
+export function isBinaryAssetPath(filePath) {
+  return /\.(png|jpe?g|gif|webp|ico|bmp|ogg|mp3|wav|flac|bin|dat|nbt|gz|class|jar|ttf|otf|woff2?)$/i.test(filePath);
+}
+
+/** Returns standard MIME type for binary mod assets. */
+export function getBinaryAssetMime(filePath) {
+  const ext = (filePath.includes('.') ? filePath.split('.').pop() : filePath).toLowerCase();
+  switch (ext) {
+    case 'png': return 'image/png';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'gif': return 'image/gif';
+    case 'webp': return 'image/webp';
+    case 'ico': return 'image/x-icon';
+    case 'bmp': return 'image/bmp';
+    case 'svg': return 'image/svg+xml';
+    case 'ogg': return 'audio/ogg';
+    case 'mp3': return 'audio/mpeg';
+    case 'wav': return 'audio/wav';
+    case 'flac': return 'audio/flac';
+    case 'ttf': return 'font/ttf';
+    case 'otf': return 'font/otf';
+    case 'woff': return 'font/woff';
+    case 'woff2': return 'font/woff2';
+    default: return 'application/octet-stream';
+  }
+}
+
+/** Safely decodes base64 into a Uint8Array across Node and browser runtimes. */
+export function decodeBase64ToUint8Array(base64) {
+  const clean = base64.replace(/\s+/g, '');
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(clean, 'base64'));
+  }
+  const binaryString = atob(clean);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** Converts stored file content into a binary Uint8Array or safe string payload. */
+export function toBinaryPayload(content) {
+  if (content instanceof Uint8Array) {
+    return content;
+  }
+  if (content instanceof ArrayBuffer) {
+    return new Uint8Array(content);
+  }
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(content)) {
+    return new Uint8Array(content);
+  }
+  if (typeof content === 'string') {
+    // 1. Base64 Data URL (e.g. data:image/png;base64,iVBOR...)
+    if (content.startsWith('data:') && content.includes(';base64,')) {
+      const b64 = content.substring(content.indexOf(';base64,') + 8);
+      return decodeBase64ToUint8Array(b64);
+    }
+    // 2. Plain Base64 string
+    const cleanB64 = content.trim().replace(/\s+/g, '');
+    if (cleanB64.startsWith('iVBORw0KGgo') || (/^[A-Za-z0-9+/=]+$/.test(cleanB64) && cleanB64.length % 4 === 0 && cleanB64.length >= 8)) {
+      try {
+        return decodeBase64ToUint8Array(cleanB64);
+      } catch (_) {}
+    }
+    // 3. Raw binary string (characters whose charCodes represent byte values 0-255: sounds, textures, nbt, gz)
+    const bytes = new Uint8Array(content.length);
+    for (let i = 0; i < content.length; i++) {
+      bytes[i] = content.charCodeAt(i) & 0xff;
+    }
+    return bytes;
+  }
+  return new Uint8Array(0);
+}
+
+

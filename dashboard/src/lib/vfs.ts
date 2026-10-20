@@ -27,6 +27,176 @@ export interface ModProjectMeta {
   logs?: string[];
 }
 
+export interface PathValidationResult {
+  valid: boolean;
+  error?: string;
+  code?: 'RESERVED_DEVICE_NAME' | 'INVALID_CHARACTERS' | 'TRAILING_DOT_OR_SPACE' | 'PATH_TRAVERSAL' | 'EMPTY_PATH';
+}
+
+export const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$|clock\$)(\..*)?$/i;
+export const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f\x7f]/;
+
+/**
+ * Validates a single filename segment against Windows reserved device names and invalid characters.
+ */
+export function validateFileName(name: string): PathValidationResult {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return { valid: false, error: 'File name cannot be empty', code: 'EMPTY_PATH' };
+  }
+  if (name.startsWith(' ') || name.endsWith(' ') || name.endsWith('.')) {
+    return { 
+      valid: false, 
+      error: `File name "${name}" cannot start or end with a space, or end with a period`, 
+      code: 'TRAILING_DOT_OR_SPACE' 
+    };
+  }
+  const trimmed = name.trim();
+  if (INVALID_FILENAME_CHARS.test(trimmed)) {
+    return { 
+      valid: false, 
+      error: `File name "${trimmed}" contains forbidden characters (<>:"/\\|?*)`, 
+      code: 'INVALID_CHARACTERS' 
+    };
+  }
+  if (WINDOWS_RESERVED_NAMES.test(trimmed)) {
+    return { 
+      valid: false, 
+      error: `"${trimmed}" is a Windows reserved device name (CON, PRN, AUX, NUL, COM0-9, LPT0-9, CONIN$, CONOUT$, CLOCK$)`, 
+      code: 'RESERVED_DEVICE_NAME' 
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * Validates a relative path, checking every directory segment for Windows reserved device names,
+ * forbidden characters, and path traversal attempts.
+ */
+export function validatePath(pathStr: string): PathValidationResult {
+  if (!pathStr || typeof pathStr !== 'string' || !pathStr.trim()) {
+    return { valid: false, error: 'Path cannot be empty', code: 'EMPTY_PATH' };
+  }
+  let decoded = pathStr;
+  try {
+    decoded = decodeURIComponent(pathStr);
+  } catch (_) {
+    return { valid: false, error: 'Path contains invalid URL encoding', code: 'INVALID_CHARACTERS' };
+  }
+  if (decoded.includes('%')) {
+    try {
+      const doubleDecoded = decodeURIComponent(decoded);
+      if (doubleDecoded !== decoded) {
+        decoded = doubleDecoded;
+      }
+    } catch (_) {}
+  }
+  const normalized = decoded.replace(/\\/g, '/');
+  const segments = normalized.split('/').filter(Boolean);
+  
+  if (segments.length === 0) {
+    return { valid: false, error: 'Path cannot be empty', code: 'EMPTY_PATH' };
+  }
+
+  for (const segment of segments) {
+    if (segment === '..' || segment === '.') {
+      return { valid: false, error: 'Directory traversal (..) is strictly prohibited', code: 'PATH_TRAVERSAL' };
+    }
+    const res = validateFileName(segment);
+    if (!res.valid) {
+      return res;
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Checks if a relative path corresponds to a binary asset (PNG textures, audio, fonts, etc.).
+ */
+export function isBinaryAssetPath(filePath: string): boolean {
+  return /\.(png|jpe?g|gif|webp|ico|bmp|ogg|mp3|wav|flac|bin|dat|nbt|gz|class|jar|ttf|otf|woff2?)$/i.test(filePath);
+}
+
+/**
+ * Returns standard MIME type for binary mod assets.
+ */
+export function getBinaryAssetMime(filePath: string): string {
+  const ext = (filePath.includes('.') ? filePath.split('.').pop() : filePath)?.toLowerCase() || '';
+  switch (ext) {
+    case 'png': return 'image/png';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'gif': return 'image/gif';
+    case 'webp': return 'image/webp';
+    case 'ico': return 'image/x-icon';
+    case 'bmp': return 'image/bmp';
+    case 'svg': return 'image/svg+xml';
+    case 'ogg': return 'audio/ogg';
+    case 'mp3': return 'audio/mpeg';
+    case 'wav': return 'audio/wav';
+    case 'flac': return 'audio/flac';
+    case 'ttf': return 'font/ttf';
+    case 'otf': return 'font/otf';
+    case 'woff': return 'font/woff';
+    case 'woff2': return 'font/woff2';
+    default: return 'application/octet-stream';
+  }
+}
+
+/**
+ * Safely decodes base64 string into Uint8Array across browser and Node.js environments.
+ */
+export function decodeBase64ToUint8Array(base64: string): Uint8Array {
+  const clean = base64.replace(/\s+/g, '');
+  if (typeof Buffer !== 'undefined') {
+    return new Uint8Array(Buffer.from(clean, 'base64'));
+  }
+  const binaryString = atob(clean);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Converts stored file content (data URL, base64, binary string, or Uint8Array)
+ * into a raw binary Uint8Array or safe string payload for ZIP packaging.
+ */
+export function toBinaryPayload(content: any): Uint8Array {
+  if (content instanceof Uint8Array) {
+    return content;
+  }
+  if (content instanceof ArrayBuffer) {
+    return new Uint8Array(content);
+  }
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(content)) {
+    return new Uint8Array(content);
+  }
+  if (typeof content === 'string') {
+    // 1. Base64 Data URL (e.g. data:image/png;base64,iVBOR...)
+    if (content.startsWith('data:') && content.includes(';base64,')) {
+      const b64 = content.substring(content.indexOf(';base64,') + 8);
+      return decodeBase64ToUint8Array(b64);
+    }
+    // 2. Plain Base64 string
+    const cleanB64 = content.trim().replace(/\s+/g, '');
+    if (cleanB64.startsWith('iVBORw0KGgo') || (/^[A-Za-z0-9+/=]+$/.test(cleanB64) && cleanB64.length % 4 === 0 && cleanB64.length >= 8)) {
+      try {
+        return decodeBase64ToUint8Array(cleanB64);
+      } catch (_) {}
+    }
+    // 3. Raw binary string (characters whose charCodes represent byte values 0-255: sounds, textures, nbt, gz)
+    const bytes = new Uint8Array(content.length);
+    for (let i = 0; i < content.length; i++) {
+      bytes[i] = content.charCodeAt(i) & 0xff;
+    }
+    return bytes;
+  }
+  return new Uint8Array(0);
+}
+
 // In-Memory fallback store
 const memoryStore = new Map<string, string>();
 const DB_NAME = 'GodHandStudio_VFS_DB';
@@ -459,6 +629,7 @@ java {
     mixins: ["LivingEntityMixin"],
     injectors: { defaultRequire: 1 }
   }, null, 2),
+  'src/main/resources/assets/godhand/icon.png': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAA7SURBVDhPY/wPBAxUAIwMDAxMYGBg+M9AIWAcNQBE49Q1jBpoGA4DhsGAoTcwMAxgGB7GBgQMA33Y/wcANl99Q+j2Q0kAAAAASUVORK5CYII=',
   'src/main/java/com/yourcompany/godhand/GodHand.java': `package com.yourcompany.godhand;
 
 import net.fabricmc.api.ModInitializer;
@@ -528,7 +699,7 @@ export class BrowserVFS {
 
   private static getStorageKey(projectId: string, path: string): string {
     const scope = this.getProjectScope(projectId);
-    const cleanPath = path.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+    const cleanPath = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').replace(/\\/g, '/');
     return `vfs_${scope}::${cleanPath}`;
   }
 
@@ -573,6 +744,10 @@ export class BrowserVFS {
   }
 
   public static async getFile(path: string, projectId?: string): Promise<string> {
+    const val = validatePath(path);
+    if (!val.valid) {
+      throw new Error(val.error || 'Invalid file path');
+    }
     const scope = this.getProjectScope(projectId);
     await this.ensureInitialized(scope);
     const key = this.getStorageKey(scope, path);
@@ -580,7 +755,7 @@ export class BrowserVFS {
     if (content === null) {
       // Fallback check against static seeds
       const seed = scope === 'arm32-fix' ? ARM32_FIX_SEED : GODHAND_DEFAULT_SEED;
-      const cleanPath = path.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+      const cleanPath = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').replace(/\\/g, '/');
       if (seed[cleanPath] !== undefined) {
         await idbSet(key, seed[cleanPath]);
         return seed[cleanPath];
@@ -590,56 +765,142 @@ export class BrowserVFS {
     return content;
   }
 
-  public static async saveFile(path: string, content: string, projectId?: string): Promise<void> {
+  public static async saveFile(path: string, content: string | Uint8Array, projectId?: string): Promise<void> {
+    const val = validatePath(path);
+    if (!val.valid) {
+      throw new Error(val.error || 'Invalid file path');
+    }
     const scope = this.getProjectScope(projectId);
     await this.ensureInitialized(scope);
     const key = this.getStorageKey(scope, path);
-    await idbSet(key, content);
+
+    let toStore: string;
+    if (content instanceof Uint8Array) {
+      const mime = getBinaryAssetMime(path);
+      if (typeof Buffer !== 'undefined') {
+        toStore = `data:${mime};base64,${Buffer.from(content).toString('base64')}`;
+      } else {
+        let bin = '';
+        for (let i = 0; i < content.length; i++) bin += String.fromCharCode(content[i]);
+        toStore = `data:${mime};base64,${btoa(bin)}`;
+      }
+    } else {
+      toStore = content;
+    }
+    await idbSet(key, toStore);
   }
 
-  public static async deleteFile(path: string, projectId?: string): Promise<void> {
+  public static async deleteFile(path: string, projectId?: string): Promise<string[]> {
+    const val = validatePath(path);
+    if (!val.valid) {
+      throw new Error(val.error || 'Invalid path');
+    }
     const scope = this.getProjectScope(projectId);
     await this.ensureInitialized(scope);
-    const key = this.getStorageKey(scope, path);
-    await idbDelete(key);
+    const cleanPath = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').replace(/\\/g, '/');
+    if (!cleanPath) {
+      throw new Error('Access denied: cannot delete workspace root');
+    }
+    const key = this.getStorageKey(scope, cleanPath);
+    const deletedPaths: string[] = [];
+
+    const direct = await idbGet(key);
+    if (direct !== null) {
+      await idbDelete(key);
+      deletedPaths.push(cleanPath);
+    }
 
     // Also delete any child files if path is a folder
     const folderPrefix = key + '/';
-    const allKeys = await idbGetAllKeys(`vfs_${scope}::`);
-    for (const k of allKeys) {
-      if (k.startsWith(folderPrefix)) {
-        await idbDelete(k);
-      }
+    const folderKeys = await idbGetAllKeys(folderPrefix);
+    for (const k of folderKeys) {
+      await idbDelete(k);
+      const rel = k.substring(`vfs_${scope}::`.length);
+      deletedPaths.push(rel);
     }
+
+    if (deletedPaths.length === 0) {
+      throw new Error(`File or folder not found: "${cleanPath}"`);
+    }
+
+    return deletedPaths;
   }
 
-  public static async moveFile(sourcePath: string, destinationPath: string, projectId?: string): Promise<void> {
+  public static async rename(oldPath: string, newPath: string, projectId?: string): Promise<{ moved: Array<{ from: string; to: string }> }> {
     const scope = this.getProjectScope(projectId);
     await this.ensureInitialized(scope);
 
-    const srcKey = this.getStorageKey(scope, sourcePath);
-    const dstKey = this.getStorageKey(scope, destinationPath);
+    const cleanOld = oldPath.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').replace(/\\/g, '/');
+    const cleanNew = newPath.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '').replace(/\\/g, '/');
 
+    if (!cleanOld || !cleanNew) {
+      throw new Error('Path cannot be empty');
+    }
+
+    if (cleanOld === cleanNew) {
+      return { moved: [] };
+    }
+
+    const valOld = validatePath(cleanOld);
+    if (!valOld.valid) {
+      throw new Error(valOld.error || 'Invalid source path');
+    }
+    const valNew = validatePath(cleanNew);
+    if (!valNew.valid) {
+      throw new Error(valNew.error || 'Invalid destination path');
+    }
+
+    if (cleanNew.startsWith(cleanOld + '/')) {
+      throw new Error('Cannot move or rename folder into its own subfolder');
+    }
+
+    const srcKey = this.getStorageKey(scope, cleanOld);
+    const dstKey = this.getStorageKey(scope, cleanNew);
+
+    // Guard against accidental overwrite when destination already exists (unless case-only rename)
+    if (cleanOld.toLowerCase() !== cleanNew.toLowerCase()) {
+      const destDirect = await idbGet(dstKey);
+      const destFolderKeys = await idbGetAllKeys(`${dstKey}/`);
+      if (destDirect !== null || destFolderKeys.length > 0) {
+        throw new Error(`Destination already exists: "${cleanNew}"`);
+      }
+    }
+
+    const moved: Array<{ from: string; to: string }> = [];
+
+    // Direct file rename
     const directContent = await idbGet(srcKey);
     if (directContent !== null) {
       await idbSet(dstKey, directContent);
       await idbDelete(srcKey);
+      moved.push({ from: cleanOld, to: cleanNew });
     }
 
-    // Move folder contents
+    // Move folder contents and cascade down child hierarchy
     const folderPrefix = srcKey + '/';
-    const allKeys = await idbGetAllKeys(`vfs_${scope}::`);
-    for (const k of allKeys) {
-      if (k.startsWith(folderPrefix)) {
-        const subContent = await idbGet(k);
-        if (subContent !== null) {
-          const suffix = k.substring(folderPrefix.length);
-          const newKey = dstKey + '/' + suffix;
-          await idbSet(newKey, subContent);
-          await idbDelete(k);
-        }
+    const folderKeys = await idbGetAllKeys(folderPrefix);
+    for (const k of folderKeys) {
+      const subContent = await idbGet(k);
+      if (subContent !== null) {
+        const suffix = k.substring(folderPrefix.length);
+        const newChildKey = dstKey + '/' + suffix;
+        await idbSet(newChildKey, subContent);
+        await idbDelete(k);
+        const oldRel = k.substring(`vfs_${scope}::`.length);
+        const newRel = newChildKey.substring(`vfs_${scope}::`.length);
+        moved.push({ from: oldRel, to: newRel });
       }
     }
+
+    if (moved.length === 0) {
+      throw new Error(`File or folder not found: "${cleanOld}"`);
+    }
+
+    return { moved };
+  }
+
+  public static async moveFile(sourcePath: string, destinationPath: string, projectId?: string): Promise<{ moved: Array<{ from: string; to: string }> }> {
+    return this.rename(sourcePath, destinationPath, projectId);
   }
 
   public static async getTree(projectId?: string): Promise<VFSNode[]> {
@@ -900,7 +1161,12 @@ public class ${className} {
       const relPath = key.substring(prefix.length);
       const content = await idbGet(key);
       if (content !== null) {
-        zip.file(relPath, content);
+        if (isBinaryAssetPath(relPath)) {
+          const payload = toBinaryPayload(content);
+          zip.file(relPath, payload, { binary: true });
+        } else {
+          zip.file(relPath, content);
+        }
       }
     }
 
@@ -922,11 +1188,15 @@ public class ${className} {
       const content = await idbGet(key);
       if (content !== null) {
         // Place resources into jar root
-        if (relPath.startsWith('src/main/resources/')) {
-          const jarResPath = relPath.substring('src/main/resources/'.length);
-          zip.file(jarResPath, content);
+        const targetPath = relPath.startsWith('src/main/resources/')
+          ? relPath.substring('src/main/resources/'.length)
+          : relPath;
+
+        if (isBinaryAssetPath(targetPath)) {
+          const payload = toBinaryPayload(content);
+          zip.file(targetPath, payload, { binary: true });
         } else {
-          zip.file(relPath, content);
+          zip.file(targetPath, content);
         }
       }
     }
@@ -947,8 +1217,15 @@ public class ${className} {
         ? cleanPath 
         : relativePath;
 
-      const content = await zipEntry.async('string');
-      await idbSet(this.getStorageKey(scope, pathTarget), content);
+      if (isBinaryAssetPath(pathTarget)) {
+        const b64 = await zipEntry.async('base64');
+        const mime = getBinaryAssetMime(pathTarget);
+        const content = `data:${mime};base64,${b64}`;
+        await idbSet(this.getStorageKey(scope, pathTarget), content);
+      } else {
+        const content = await zipEntry.async('string');
+        await idbSet(this.getStorageKey(scope, pathTarget), content);
+      }
       importedCount++;
     }
 
@@ -967,8 +1244,18 @@ public class ${className} {
           if (entry.name.endsWith('.jar') || entry.name.endsWith('.class')) continue;
           const file = await entry.getFile();
           if (file.size < 5 * 1024 * 1024) {
-            const text = await file.text();
-            await idbSet(BrowserVFS.getStorageKey(scope, itemPath), text);
+            if (isBinaryAssetPath(itemPath)) {
+              const b64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+              await idbSet(BrowserVFS.getStorageKey(scope, itemPath), b64);
+            } else {
+              const text = await file.text();
+              await idbSet(BrowserVFS.getStorageKey(scope, itemPath), text);
+            }
             count++;
           }
         } else if (entry.kind === 'directory') {
@@ -994,8 +1281,18 @@ public class ${className} {
       const cleanPath = webkitPath ? webkitPath.replace(/^[^/]+\//, '') : file.name;
       if (cleanPath.includes('.git/') || cleanPath.includes('build/') || cleanPath.includes('.gradle/')) continue;
       if (file.size < 5 * 1024 * 1024) {
-        const text = await file.text();
-        await idbSet(this.getStorageKey(scope, cleanPath), text);
+        if (isBinaryAssetPath(cleanPath)) {
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          await idbSet(this.getStorageKey(scope, cleanPath), b64);
+        } else {
+          const text = await file.text();
+          await idbSet(this.getStorageKey(scope, cleanPath), text);
+        }
         count++;
       }
     }
