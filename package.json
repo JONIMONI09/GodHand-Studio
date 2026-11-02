@@ -21,6 +21,6 @@
     "codegraph": "^1.0.0",
     "firebase": "^12.19.0",
     "react-hot-toast": "^2.6.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   }
 }
